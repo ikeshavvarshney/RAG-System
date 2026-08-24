@@ -1,0 +1,25 @@
+# secrets
+.env
+*.env
+!.env.example
+.env.local
+.env*.local
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# derived data (corpus itself IS tracked)
+data/chroma/
+
+# node / next
+node_modules/
+.next/
+out/
+
+# os
+.DS_Store
