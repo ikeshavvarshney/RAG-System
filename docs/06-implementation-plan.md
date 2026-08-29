@@ -1,6 +1,6 @@
 # 6. Implementation Plan
 
-Eight weeks, one major build stage per week. Each stage produces something independently verifiable, so that progress is measurable rather than assumed.
+Eight weeks, with one major build stage per week. Each stage produces an independently verifiable result, so that progress is measurable rather than assumed.
 
 ---
 
@@ -21,7 +21,7 @@ Integration work, the final report, and the demonstration are shared.
 
 ## 6.2 Schedule
 
-### Week 1 — Design Lock and Environment Setup
+### Week 1. Design Lock and Environment Setup
 
 **Objective:** both members can run the project locally and begin building against a shared, unambiguous interface.
 
@@ -29,7 +29,7 @@ Integration work, the final report, and the demonstration are shared.
 |---|---|
 | A | Repository structure; dependency manifest; typed configuration; provider-client wrapper handling credential rotation and token accounting; service skeleton with health endpoint |
 | B | Frontend scaffold with typed API client; corpus validator; corpus collection |
-| Both | Passage and citation schema — written jointly and agreed by both |
+| Both | Passage and citation schema, written jointly and agreed by both |
 | Both | API credentials; local model weights initialised during setup |
 
 **Verification:** backend test suite passes; frontend builds without error; corpus validator passes against the collected corpus; both members can run the full stack locally.
@@ -38,7 +38,7 @@ The passage schema is written jointly rather than by one member because it is th
 
 ---
 
-### Week 2 — Ingestion Pipeline, Part 1
+### Week 2. Ingestion Pipeline, Part 1
 
 **Objective:** a file uploaded in any supported format routes to the correct extraction path and produces passages end to end.
 
@@ -55,7 +55,7 @@ Chunking at this stage is a deliberate placeholder. Structure-aware chunking arr
 
 ---
 
-### Week 3 — Ingestion Pipeline, Part 2
+### Week 3. Ingestion Pipeline, Part 2
 
 **Objective:** ingestion is complete; the corpus is fully indexed and searchable through both retrieval channels.
 
@@ -68,11 +68,11 @@ Chunking at this stage is a deliberate placeholder. Structure-aware chunking arr
 
 **Verification:** documents containing tables produce structured passages tagged as vision-extracted; forced vision failure falls back to OCR with the cause logged; chunk boundaries respect document structure and tables remain intact; passage counts match between the two indexes; re-ingestion produces no duplicates.
 
-The full-corpus run at the end of this week is the first substantial workload against the API free tier and the first measurement of how much visual content the corpus actually yields. If vision-extracted passages prove sparse, the corpus or the extraction trigger requires attention here — the alternative is discovering it in Week 7, when there is no time to respond.
+The full-corpus run at the end of this week is the first substantial workload against the API free tier and the first measurement of how much visual content the corpus actually yields. If vision-extracted passages prove sparse, the corpus or the extraction trigger requires attention at this point. The alternative is discovering the shortfall in Week 7, when there is no time to respond.
 
 ---
 
-### Week 4 — Query Pipeline, Part 1
+### Week 4. Query Pipeline, Part 1
 
 **Objective:** a question is validated, resolved against conversation history, cache-checked, expanded, and searched through both retrieval channels.
 
@@ -89,7 +89,7 @@ Pipeline-stage instrumentation is added during this week even though nothing con
 
 ---
 
-### Week 5 — Query Pipeline, Part 2
+### Week 5. Query Pipeline, Part 2
 
 **Objective:** retrieved candidates are fused, assessed, supplemented where necessary, and reranked into clean context.
 
@@ -104,11 +104,11 @@ Pipeline-stage instrumentation is added during this week even though nothing con
 
 The fusion weighting is implemented as a configuration parameter from its first commit, since RQ1 varies it. Implementing it as a constant would mean beginning Week 7 with a refactor that Week 7 has no capacity to absorb.
 
-Output quality at this stage is expected to be rough. Refinement occurs in Week 6, and Week 7's evaluation identifies what actually requires attention rather than what appears to.
+Output quality at this stage is expected to be rough. Refinement occurs in Week 6, and the Week 7 evaluation identifies what actually requires attention rather than what appears to.
 
 ---
 
-### Week 6 — Generation, Citations, and Service Layer
+### Week 6. Generation, Citations, and Service Layer
 
 **Objective:** reranked context becomes a cited, verified answer, exposed through a stable API.
 
@@ -119,13 +119,13 @@ Output quality at this stage is expected to be rough. Refinement occurs in Week 
 | B | Cited answer generation, including synthesis for decomposed questions; groundedness filtering; output guardrails; cache and history write-back; API finalisation with stage streaming |
 | A | Integration testing against the real corpus; continued evaluation preparation |
 
-**Verification:** a defined set of end-to-end scenarios — corpus question, cached repeat, web-fallback question, decomposed question, session-scoped question, greeting, rejected input, table-dependent question, follow-up question, and post-deletion question — all complete correctly against the real corpus.
+**Verification:** a defined set of end-to-end scenarios completes correctly against the real corpus: corpus question, cached repeat, web-fallback question, decomposed question, session-scoped question, greeting, rejected input, table-dependent question, follow-up question, and post-deletion question.
 
 This scenario set doubles as the demonstration script for Week 8, so completing all of them cleanly has value beyond verification.
 
 ---
 
-### Week 7 — Evaluation and Ablation Studies
+### Week 7. Evaluation and Ablation Studies
 
 **Objective:** system quality is measured, and both research questions are answered quantitatively.
 
@@ -135,7 +135,7 @@ This scenario set doubles as the demonstration script for Week 8, so completing 
 |---|---|
 | A | Reference question set finalised; RAGAS baseline established; RQ2 extraction ablation |
 | B | RQ1 fusion weighting ablation; defect resolution arising from evaluation |
-| Both | Paper drafting — methodology and results sections |
+| Both | Paper drafting: methodology and results sections |
 
 **Verification:** both ablation studies produce complete result tables with real measured deltas.
 
@@ -145,7 +145,7 @@ The sequencing within the week is fixed: establish baseline, resolve defects, re
 
 ---
 
-### Week 8 — Paper, Demonstration, and Buffer
+### Week 8. Paper, Demonstration, and Buffer
 
 **Objective:** the research paper is complete and the demonstration is prepared.
 
@@ -159,11 +159,11 @@ The sequencing within the week is fixed: establish baseline, resolve defects, re
 
 **Verification:** the paper is complete with every reported figure traceable to a results file; the demonstration has been rehearsed end to end with a fallback recording captured; a clean repository checkout can be brought to a running state by following the documented setup procedure alone.
 
-The methodology and results sections are drafted in Week 7 rather than deferred here. Week 8 covers the framing sections, the demonstration, and slack — which experience suggests will be consumed by defects the demonstration rehearsal surfaces.
+The methodology and results sections are drafted in Week 7 rather than deferred here. Week 8 covers the framing sections, the demonstration, and schedule buffer, which is expected to absorb defects surfaced by the demonstration rehearsal.
 
 ---
 
-## 6.3 Parallel Track — Web Interface
+## 6.3 Parallel Track: Web Interface
 
 **Requirements:** FRONTEND-01, FRONTEND-02, FRONTEND-03, FRONTEND-04, FRONTEND-05
 
@@ -182,17 +182,17 @@ FRONTEND-03 and FRONTEND-04 both depend on the backend emitting structured event
 
 ## 6.4 Risk Assessment
 
-Stated openly rather than discovered late. The requirement set is substantial for two people in eight weeks, and the following are the points most likely to come under pressure.
+The requirement set is substantial for two people in eight weeks. The following are the points most likely to come under schedule pressure, recorded in advance so that mitigations are in place before they are needed.
 
 | Rank | Risk | Assessment | Mitigation |
 |---|---|---|---|
 | 1 | **Week 7 overload** | Constructing the question set, establishing a baseline, resolving defects, and running two ablation sweeps within one week is the densest point in the schedule. Any slippage in Weeks 4-6 compounds here | Reference questions drafted from Week 4; fusion weighting configurable from Week 5; evaluation harness parameterised so both sweeps reuse one implementation |
 | 2 | **Week 5 complexity** | Fusion, sufficiency assessment, web fallback, reranking, and decomposition constitute five distinct pieces of branching logic in one week. Decomposition in particular multiplies retrieval cost per question | Decomposition is the last item; if the week slips, it is the flagged item rather than a silently dropped one |
 | 3 | **Week 6 convergence** | Generation, two verification stages, cache write-back, and API finalisation all land together, immediately before the evaluation week | The end-to-end scenario set provides a concrete completion criterion rather than a subjective one |
-| 4 | **Frontend stage monitoring** | FRONTEND-03 requires backend instrumentation not present in the original design | Instrumentation added Week 4, exposed Week 6 — dependency resolved by sequencing |
+| 4 | **Frontend stage monitoring** | FRONTEND-03 requires backend instrumentation not present in the original design | Instrumentation added Week 4 and exposed Week 6, resolving the dependency by sequencing |
 | 5 | **API rate limits** | Free-tier limits bind hardest during Week 7's repeated evaluation runs | Key rotation from Week 1; embedding and extraction caches; checkpointed evaluation runs that resume rather than restart |
 
-**If schedule pressure materialises,** the responses in order of preference are: treat deployment as fully dropped rather than attempted, which is already the plan; reduce the scope of frontend polish; and, if Weeks 5-6 slip materially, raise decomposition or the output guardrail layer for explicit discussion rather than reducing scope silently.
+**If schedule pressure materialises,** the responses in order of preference are: confirm deployment as future scope rather than attempting it, which is already the plan; reduce the scope of frontend polish; and, if Weeks 5-6 slip materially, raise decomposition or the output guardrail layer for explicit discussion rather than reducing scope silently.
 
 The evaluation week is protected in preference to feature completeness. A system with one fewer pipeline stage and two clean ablation studies is a stronger deliverable than a feature-complete system with no measured results.
 

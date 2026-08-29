@@ -19,15 +19,15 @@ Large-model inference is performed through hosted APIs. Two small models run loc
 
 ### Selection rationale
 
-**Single provider for language and embedding models.** Generation, vision, and embeddings are all served by Gemini. The determining factor was not capability — several providers offer comparable models on comparable free tiers — but operational simplicity. One provider means one credential pool to rotate and one rate limit to reason about, rather than three interacting limits whose combined behaviour under load is difficult to predict.
+**Single provider for language and embedding models.** Generation, vision, and embeddings are all served by Gemini. The determining factor was operational simplicity rather than capability, since several providers offer comparable models on comparable free tiers. One provider means one credential pool to rotate and one rate limit to reason about, rather than three interacting limits whose combined behaviour under load is difficult to predict.
 
 **Fast model for auxiliary tasks.** Only final answer generation uses the larger model. Query expansion, decomposition, guardrail classification, sufficiency assessment, and conversational resolution are all comparatively simple transformations for which the faster and cheaper model is sufficient. Since the query pipeline executes several model calls in sequence, this choice has a direct and substantial effect on end-to-end latency.
 
 **Fast model for vision extraction.** Vision extraction is the single heaviest ingestion cost against the free tier. The faster model is the default, subject to an explicit empirical check during development: both models are run against a sample of real corpus tables and compared on transcription quality before the full corpus is processed. Whichever is selected is then held fixed for the entire corpus, since RQ2 requires a consistent extraction baseline.
 
-**Local cross-encoder for reranking.** A 22-million-parameter cross-encoder executes in tens of milliseconds on CPU. A hosted reranking API was considered and rejected: it would have added a network round trip to every query, a third credential pool, and a third rate limit, in exchange for quality that the local model broadly matches at this corpus size. Should reranking prove to be the accuracy bottleneck during evaluation, a larger cross-encoder remains available as a drop-in replacement — more accurate, still CPU-viable, measurably slower.
+**Local cross-encoder for reranking.** A 22-million-parameter cross-encoder executes in tens of milliseconds on CPU. A hosted reranking API was considered and rejected: it would have added a network round trip to every query, a third credential pool, and a third rate limit, in exchange for quality that the local model broadly matches at this corpus size. Should reranking prove to be the accuracy bottleneck during evaluation, a larger cross-encoder remains available as a drop-in replacement: more accurate, still CPU-viable, and measurably slower.
 
-**PaddleOCR over Tesseract as the primary OCR engine.** This choice is driven by RQ2 more than by general accuracy. PaddleOCR's PP-Structure component performs table structure recognition, recovering rows and columns rather than emitting words in reading order. With a structure-blind OCR engine as the comparison baseline, a substantial portion of what RQ2 would measure is simply "structured output versus unstructured output" — an unsurprising result for vision extraction that says little about the interesting question. A structure-aware OCR baseline makes the comparison genuinely informative. Tesseract is retained as a fallback so that an unavailable primary engine does not block ingestion.
+**PaddleOCR over Tesseract as the primary OCR engine.** This choice is driven by RQ2 more than by general accuracy. PaddleOCR's PP-Structure component performs table structure recognition, recovering rows and columns rather than emitting words in reading order. With a structure-blind OCR engine as the comparison baseline, a substantial portion of what RQ2 would measure is simply structured output versus unstructured output, an unsurprising result for vision extraction that says little about the question of interest. A structure-aware OCR baseline makes the comparison genuinely informative. Tesseract is retained as a fallback so that an unavailable primary engine does not block ingestion.
 
 **Embedding model choice and its limitation.** Larger open-weight embedding models currently achieve better retrieval benchmark results than the hosted model used here. They were not adopted because self-hosting one requires GPU memory well beyond what is available. This is recorded as a limitation in the research methodology rather than presented as a neutral choice: retrieval results reported by this project are conditioned on one embedding model, and a stronger model would plausibly shift the baseline.
 
@@ -48,7 +48,7 @@ A related constraint follows from this: query vectors and passage vectors must o
 | tiktoken | Token counting for chunk-size targets |
 | httpx | HTTP client for services without a first-party adapter |
 
-**FastAPI** was chosen for native asynchronous support, which the pipeline requires — dense and sparse retrieval execute concurrently, and decomposed questions retrieve for several sub-questions in parallel. Its Pydantic integration also means the API schema and the internal data model are defined once rather than maintained separately.
+**FastAPI** was chosen for native asynchronous support, which the pipeline requires: dense and sparse retrieval execute concurrently, and decomposed questions retrieve for several sub-questions in parallel. Its Pydantic integration also means the API schema and the internal data model are defined once rather than maintained separately.
 
 **Pydantic** enforces the passage schema at runtime. Since that schema is the contract between two independently developed pipelines, validation failures surface at the boundary where they occur rather than as confusing downstream errors.
 
@@ -63,11 +63,11 @@ A related constraint follows from this: query vectors and passage vectors must o
 | Chroma | Vector store, persisted to local disk |
 | rank_bm25 | In-process BM25 keyword index |
 
-**Chroma** stores every passage vector with its full metadata, filterable at query time by document scope and by extraction method. Hosted vector databases were considered and rejected: a corpus of this size does not justify external infrastructure, and a local store carries two practical advantages for this project specifically. The corpus travels with the repository, so both team members work against identical data without a synchronisation step; and RQ2 requires two parallel indexes — one vision-extracted, one OCR-only — which is straightforward with local collections and awkward against a hosted free tier's storage allowance.
+**Chroma** stores every passage vector with its full metadata, filterable at query time by document scope and by extraction method. Hosted vector databases were considered and rejected: a corpus of this size does not justify external infrastructure, and a local store carries two practical advantages for this project specifically. The corpus travels with the repository, so both team members work against identical data without a synchronisation step; and RQ2 requires two parallel indexes, one vision-extracted and one OCR-only, which is straightforward with local collections and awkward against a hosted free tier's storage allowance.
 
 **rank_bm25** provides the sparse retrieval half. A dedicated search engine such as Elasticsearch would be substantial infrastructure for a corpus this size. The index is held in memory and rebuilt from persisted passage text at startup, which is effectively instantaneous here.
 
-One consequence of this design is noted in the architecture document and repeated because it is easy to overlook: the BM25 index maintains its own copy of passage text and offers no delete operation, so any deletion from the vector store must be followed by an index rebuild.
+One consequence of this design is also recorded in the architecture document, and is repeated here because it is easy to overlook: the BM25 index maintains its own copy of passage text and offers no delete operation, so any deletion from the vector store must be followed by an index rebuild.
 
 ---
 
@@ -107,7 +107,7 @@ Web results carry a source URL rather than a document and page reference. This d
 
 TypeScript types mirror the backend's Pydantic models, particularly the citation union, so that the interface's branching on citation type is checked at compile time rather than discovered at runtime.
 
-Live pipeline progress and per-query token usage are received over a single streaming response in Server-Sent Events format, read through a streaming fetch rather than the browser's native event-source API — the latter issues only GET requests, whereas the query carries a JSON body. No additional client library is required.
+Live pipeline progress and per-query token usage are received over a single streaming response in Server-Sent Events format, read through a streaming fetch rather than the browser's native event-source API, because that API issues only GET requests whereas the query carries a JSON body. No additional client library is required.
 
 The frontend makes no direct calls to any model provider. All provider credentials remain server-side; the only value exposed to the client is the backend's base URL.
 
@@ -137,16 +137,16 @@ RAGAS itself invokes a language model to produce its judgments, so an evaluation
 
 ---
 
-## 4.9 Excluded Technologies
+## 4.9 Technologies Not Adopted
 
-| Excluded | Reason |
+| Technology | Reason not adopted |
 |---|---|
 | GPU-based local inference of large models | No suitable hardware available; the determining constraint on the whole stack |
 | Hosted reranking APIs | A local cross-encoder matches them closely at this scale while removing a network round trip and a rate limit |
-| Large open-weight embedding models | Better retrieval quality, but memory requirements exceed available hardware. Recorded as a limitation |
+| Large open-weight embedding models | Better retrieval quality, but memory requirements exceed available hardware. Recorded as a limitation and revisited in future work |
 | Hosted vector databases | Unwarranted infrastructure at this corpus size; local storage also simplifies the parallel indexes RQ2 requires |
 | Elasticsearch or equivalent | Same reasoning applied to sparse retrieval |
 | Dedicated guardrails frameworks | Rigorous, but guardrails are two requirements here rather than a research focus. Cited in related work as the established alternative |
-| Authentication and multi-user support | Out of scope for an academic demonstration |
-| Containerisation and orchestration | The system runs locally; deployment is an optional extension |
-| Task queues | Ingestion is a one-time batch operation, not a background workload |
+| Authentication and multi-user support | Future scope; the current deliverable is a single-user academic demonstration |
+| Containerisation and orchestration | Future scope, alongside public deployment; the system currently runs locally |
+| Task queues | Ingestion is a one-time batch operation rather than a continuous background workload |
