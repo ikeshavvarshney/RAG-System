@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend
 
-## Getting Started
+Next.js (App Router) web interface for the Multimodal Hybrid-Retrieval RAG Framework. Provides document upload, chat-style querying, citation display, live pipeline-stage progress, and per-query token and cost reporting.
 
-First, run the development server:
+Requirements covered: FRONTEND-01 to FRONTEND-05. See [02. Requirements Specification](../docs/02-requirements-specification.md).
+
+## Stack
+
+| Component | Role |
+|---|---|
+| Next.js (App Router) | Application framework |
+| React with TypeScript | Component model and type safety across the API boundary |
+| Tailwind CSS | Styling |
+
+TypeScript types mirror the backend Pydantic models, in particular the citation union, so that branching on citation type is checked at compile time.
+
+## Prerequisites
+
+- Node.js 18.18 or later
+- A running backend service (see the repository root README)
+
+## Configuration
+
+Copy the example environment file and set the backend base URL:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.local.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Base URL of the backend service |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+No model-provider credentials are used by the frontend. All provider credentials remain server-side; the backend base URL is the only value exposed to the client.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Development
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+The development server runs at http://localhost:3000.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Build
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run build
+npm run start
+```
 
-## Deploy on Vercel
+## Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Live pipeline progress and token usage arrive over a single streaming response in Server-Sent Events format, read through a streaming `fetch` rather than the browser `EventSource` API, because the query request carries a JSON body and `EventSource` issues only GET requests. No additional client library is required.

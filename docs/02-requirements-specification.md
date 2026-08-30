@@ -1,6 +1,6 @@
 # 2. Requirements Specification
 
-Each requirement carries a stable identifier used throughout the project documentation, the codebase, and the traceability matrix in §2.8.
+Each requirement carries a stable identifier used throughout the project documentation, the codebase, and the traceability matrix in section 2.8.
 
 ---
 
@@ -11,7 +11,7 @@ Each requirement carries a stable identifier used throughout the project documen
 | **INGEST-01** | The system routes uploaded PDF, DOCX, and image files by type to the appropriate extraction path. |
 | **INGEST-02** | The system extracts charts and tables using a vision-language model, falling back to OCR when vision extraction fails or is unavailable. |
 | **INGEST-03** | The system segments extracted text using a structure-aware strategy that respects document boundaries such as headings, paragraphs, and table blocks, rather than fixed-size splitting. |
-| **INGEST-04** | The system indexes every passage twice — as a dense embedding vector in the vector store, and as raw text in the keyword index. |
+| **INGEST-04** | The system indexes every passage twice: as a dense embedding vector in the vector store, and as raw text in the keyword index. |
 
 ## 2.2 User-Uploaded Documents
 
@@ -65,9 +65,9 @@ Each requirement carries a stable identifier used throughout the project documen
 | **RESEARCH-02** | Multimodal extraction is ablated. Vision-model extraction is compared against OCR-only extraction on table- and chart-dependent questions, with metric deltas reported. |
 | **PAPER-01** | A research paper is produced covering methodology, system architecture, related work, and the results of both ablation studies. |
 
-## 2.7 Optional Requirements
+## 2.7 Future Scope Requirements
 
-Not required for project completion. Attempted only if the core deliverables are complete with time remaining.
+Deferred beyond the core eight-week deliverable and not required for project completion. Attempted only if the mandatory deliverables are complete with time remaining.
 
 | ID | Requirement |
 |---|---|
@@ -82,7 +82,7 @@ Not required for project completion. Attempted only if the core deliverables are
 
 | Week | Stage | Requirements |
 |---|---|---|
-| 1 | Design lock and environment setup | — (enables all subsequent work) |
+| 1 | Design lock and environment setup | None (enables all subsequent work) |
 | 2 | Ingestion, part 1 | INGEST-01 |
 | 3 | Ingestion, part 2 | INGEST-02, INGEST-03, INGEST-04 |
 | 4 | Query pipeline, part 1 | QUERY-01, QUERY-02, QUERY-03, QUERY-04, QUERY-13, QUERY-15, USERDOC-01, USERDOC-02 |
@@ -91,18 +91,18 @@ Not required for project completion. Attempted only if the core deliverables are
 | 7 | Evaluation and ablations | EVAL-01, RESEARCH-01, RESEARCH-02 |
 | 8 | Paper and demonstration | PAPER-01 |
 | 4-6 (parallel) | Web interface | FRONTEND-01, FRONTEND-02, FRONTEND-03, FRONTEND-04, FRONTEND-05 |
-| Optional | Deployment | DEPLOY-01, DEPLOY-02 |
+| Future scope | Deployment | DEPLOY-01, DEPLOY-02 |
 
 **Coverage:** 31 of 31 mandatory requirements are assigned to a specific stage. No requirement is unassigned.
 
 ---
 
-## 2.9 Requirement Boundaries Worth Noting
+## 2.9 Requirement Boundaries
 
-Three pairs of requirements are deliberately kept distinct, as the difference is easy to collapse and each is separately assessable.
+Three pairs of requirements are deliberately kept distinct. In each case the difference is easy to collapse, and each requirement is separately assessable.
 
-**QUERY-10 and QUERY-14** address different failure modes. QUERY-10 asks whether the answer is *supported by the retrieved context* — a factual grounding question. QUERY-14 asks whether the answer is *safe and of acceptable quality* — independent of whether it is well-grounded. An answer can be perfectly grounded and still fail QUERY-14, or be entirely benign while failing QUERY-10.
+**QUERY-10 and QUERY-14** address different failure modes. QUERY-10 asks whether the answer is supported by the retrieved context, a question of factual grounding. QUERY-14 asks whether the answer is safe and of acceptable quality, independent of whether it is well-grounded. An answer can be perfectly grounded and still fail QUERY-14, or be entirely benign while failing QUERY-10.
 
 **QUERY-03 and QUERY-12** both produce multiple queries from one input, but for different reasons. Expansion (QUERY-03) generates paraphrases of a single question to improve recall; every result addresses the same information need. Decomposition (QUERY-12) splits a compound question into genuinely distinct sub-questions, each requiring its own retrieval and contributing a different part of the final answer.
 
-**USERDOC-01 and QUERY-15** both make use of a session identifier but serve unrelated purposes — the former scopes retrieval to a set of uploaded documents, the latter maintains conversational context. They share an identifier as an implementation convenience, not because they are the same concern.
+**USERDOC-01 and QUERY-15** both make use of a session identifier but serve unrelated purposes. The former scopes retrieval to a set of uploaded documents; the latter maintains conversational context. They share an identifier as an implementation convenience, not because they are the same concern.
