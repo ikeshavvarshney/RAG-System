@@ -29,3 +29,10 @@ out/
 
 # os
 .DS_Store
+
+# installers / binaries (not source, re-downloadable)
+*.exe
+
+# vendored Tesseract build: extracted from the installer, ~100MB of binaries.
+# Recreate with: 7z x tesseract-ocr-w64-setup-*.exe -o vendor/tesseract
+vendor/

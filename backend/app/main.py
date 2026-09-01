@@ -1,11 +1,8 @@
 from fastapi  import FastAPI 
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health
-from app.core.config import settings
-
-from app.api.routes import health
 from app.api.routes import health, ingest
+from app.core.config import settings
 
 def create_app() -> FastAPI:
     app= FastAPI(title="Multimodal RAG", version="0.1.0")

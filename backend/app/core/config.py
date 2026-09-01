@@ -1,5 +1,10 @@
+from pathlib import Path
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# .../RAG-System/backend/app/core/config.py -> .../RAG-System
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -15,6 +20,12 @@ class Settings(BaseSettings):
 
 #---Storage ----
     CHROMA_PATH: str = "./data/chroma"
+
+
+#---OCR engine ---
+    # Absolute path to the Tesseract binary. Overridable per machine via .env
+    # so the wrapper does not depend on the developer's system PATH.
+    TESSERACT_CMD: str = str(_REPO_ROOT / "vendor" / "tesseract" / "tesseract.exe")
 
 
 #---Frontend / CORS ---

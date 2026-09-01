@@ -1,14 +1,14 @@
+import Chat from "@/components/Chat";
+import HealthBadge from "@/components/HealthBadge";
+
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-4 px-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Multimodal RAG</h1>
-      <p className="text-neutral-600">
-        Chat UI ships in the frontend track. Backend health check lives at{" "}
-        <code className="rounded bg-neutral-100 px-1.5 py-0.5 text-sm">
-          /api/health
-        </code>
-        .
-      </p>
+    <main className="mx-auto flex h-screen max-w-3xl flex-col">
+      <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+        <h1 className="text-lg font-semibold tracking-tight">Multimodal RAG</h1>
+        <HealthBadge />
+      </header>
+      <Chat />
     </main>
   );
 }

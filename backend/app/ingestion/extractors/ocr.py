@@ -1,9 +1,13 @@
 import pytesseract
 from PIL import Image
 
-# Explicit path — keeps the wrapper working regardless of system PATH,
-# and makes the dependency visible/portable across teammates' machines.
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+from app.core.config import settings
+
+# Explicit path, sourced from settings (override TESSERACT_CMD in .env).
+# Keeps the wrapper working regardless of system PATH and lets each machine
+# point at its own install without editing code. Default is the vendored
+# copy at <repo>/vendor/tesseract/ (gitignored, see README).
+pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
 
 
 class OCRUnavailable(Exception):
