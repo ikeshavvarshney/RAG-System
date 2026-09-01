@@ -43,7 +43,7 @@ A related constraint follows from this: query vectors and passage vectors must o
 | Uvicorn | ASGI server |
 | Pydantic | Passage and citation schema, request/response validation |
 | pydantic-settings | Typed configuration loaded from environment |
-| LangChain | Pipeline orchestration across retrieval, fusion, reranking, and generation |
+| LangChain | Primary framework: both pipelines are composed as LCEL chains of Runnable stages |
 | sentence-transformers | Executes the local cross-encoder |
 | tiktoken | Token counting for chunk-size targets |
 | httpx | HTTP client for services without a first-party adapter |
@@ -52,7 +52,9 @@ A related constraint follows from this: query vectors and passage vectors must o
 
 **Pydantic** enforces the passage schema at runtime. Since that schema is the contract between two independently developed pipelines, validation failures surface at the boundary where they occur rather than as confusing downstream errors.
 
-**LangChain** provides orchestration and provider adapters. It is used for composition rather than for its higher-level abstractions; the pipeline's control flow is explicit, since several stages involve branching that would be obscured by an opaque chain abstraction.
+**LangChain** is the primary framework rather than a supporting library. Both the ingestion and query pipelines are expressed as LCEL chains, in which each stage is a `Runnable` composed with sequence, parallel, and branch combinators, and provider access runs through LangChain adapters for Gemini, Chroma, and Tavily. Stages with no first-party component, such as reciprocal rank fusion, cross-encoder reranking, and the semantic cache, are implemented as plain functions and wrapped as runnables, which keeps their logic directly testable while the composition remains uniform.
+
+Control flow remains explicit under this design. Conditional stages, including the greeting short-circuit, the cache hit path, and the web-search fallback, are declared as explicit branch nodes, so the chain definition states the branching conditions rather than concealing them. LangGraph was considered and rejected: the query pipeline is an acyclic branching graph with no loops or replanning, so a second framework and a state-machine formulation would add complexity without capability.
 
 ---
 

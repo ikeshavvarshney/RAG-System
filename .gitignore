@@ -15,8 +15,12 @@ __pycache__/
 .venv/
 venv/
 
-# derived data (corpus itself IS tracked)
+# derived data
 data/chroma/
+
+# corpus documents: re-fetchable from data/corpus/manifest.csv via
+# ./scripts/fetch_corpus.sh, so the manifest is tracked and the bytes are not
+data/corpus/files/
 
 # node / next
 node_modules/

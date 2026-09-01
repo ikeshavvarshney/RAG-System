@@ -44,7 +44,7 @@ Each requirement carries a stable identifier used throughout the project documen
 
 | ID | Requirement |
 |---|---|
-| **BACKEND-01** | A FastAPI service exposes ingestion and query endpoints, with LangChain orchestrating the internal pipeline stages. |
+| **BACKEND-01** | A FastAPI service exposes ingestion and query endpoints. Both pipelines are implemented as LangChain LCEL chains, with FastAPI serving only as the HTTP boundary. |
 
 ## 2.5 Web Interface
 
