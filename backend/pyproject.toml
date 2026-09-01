@@ -12,6 +12,7 @@ dependencies = [
     "pillow>=11.0",
     "pytesseract>=0.3",
     "tiktoken>=0.8",
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]
