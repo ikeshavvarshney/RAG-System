@@ -1,5 +1,8 @@
-import pytest
+import io
+
+import docx as docx_lib
 import pymupdf
+import pytest
 
 from app.ingestion.router import UnsupportedFileType, detect_file_type, route_file
 
@@ -54,8 +57,16 @@ def test_route_file_dispatches_to_pdf_extractor():
 
 
 def test_route_file_dispatches_to_docx_extractor():
-    with pytest.raises(NotImplementedError):
-        route_file("report.docx", DOCX_BYTES)
+    document = docx_lib.Document()
+    document.add_paragraph("Real DOCX content for router dispatch test.")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    real_docx_bytes = buffer.getvalue()
+
+    result = route_file("report.docx", real_docx_bytes)
+
+    assert isinstance(result, list)
+    assert result[0]["extraction_method"] == "text"
 
 
 def test_route_file_unsupported_raises():
