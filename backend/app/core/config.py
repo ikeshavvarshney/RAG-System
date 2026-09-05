@@ -21,6 +21,13 @@ class Settings(BaseSettings):
 #---Storage ----
     CHROMA_PATH: str = "./data/chroma"
 
+    #---Vision & Embedding (Week 3) ---
+    EMBEDDING_MODEL: str = "text-embedding-004"
+    VISION_MODEL: str = "gemini-3.6-flash"
+    MAX_VISION_PAGES: int = 80
+    EMBEDDING_CACHE_DIR: str = "./data/cache/embeddings"
+    VISION_CACHE_DIR: str = "./data/cache/vision"
+
 
 #---OCR engine ---
     # Absolute path to the Tesseract binary. Overridable per machine via .env

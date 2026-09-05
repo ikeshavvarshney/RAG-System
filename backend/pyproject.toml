@@ -15,6 +15,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "google-genai>=1.0",
     "pypdf>=5.0",
+    "langchain-text-splitters>=0.3",
 ]
 
 [project.optional-dependencies]
