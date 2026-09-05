@@ -1,26 +1,23 @@
-import io
+from app.ingestion.extractors import vision
 
-from PIL import Image
 
-from app.ingestion.extractors.ocr import run_ocr
+def _mime_for(content: bytes) -> str:
+    return "image/jpeg" if content[:3] == b"\xff\xd8\xff" else "image/png"
 
 
 def extract(content: bytes, filename: str):
-    """Load an image and OCR it into a single text chunk.
+    """Standalone images always get the vision pass (INGEST-02).
 
-    Decorative images with no text yield zero chunks rather than a chunk
-    of whitespace.
+    ``vision.extract_image`` performs the OCR fallback internally and only
+    raises ``VisionExtractionError`` when vision *and* OCR both fail; that
+    propagates for the pipeline to isolate per-file (D-19).
+
+    An image that yields no text at all (blank/decorative) produces zero
+    chunks rather than a chunk of whitespace.
     """
-    image = Image.open(io.BytesIO(content))
-    text = run_ocr(image)
-
-    if not text:
+    piece = vision.extract_image(
+        content, page=None, location=None, mime_type=_mime_for(content)
+    )
+    if not piece["text"].strip():
         return []
-
-    return [{
-        "page": None,
-        "location": None,
-        "text": text,
-        "extraction_method": "ocr",
-        "chunk_type": "text",
-    }]
+    return [piece]

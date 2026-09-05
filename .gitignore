@@ -36,3 +36,7 @@ out/
 # vendored Tesseract build: extracted from the installer, ~100MB of binaries.
 # Recreate with: 7z x tesseract-ocr-w64-setup-*.exe -o vendor/tesseract
 vendor/
+
+# D-28 vision model comparison: fetched figures + raw model outputs (regenerate
+# with scripts/vision_model_compare.py)
+scripts/vision_cmp_out/

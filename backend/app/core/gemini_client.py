@@ -2,6 +2,7 @@ import logging
 import time
 
 from google import genai
+from google.genai import types
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from app.core.key_rotation import gemini_keys
@@ -91,6 +92,44 @@ class GeminiClient:
                 output_tokens=usage.candidates_token_count,
             )
             return response.text
+
+        return self._call_with_key_rotation(_operation)
+
+    def generate_vision(
+        self,
+        stage: str,
+        model: str,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str,
+    ) -> str:
+        """Send one image + text prompt to a Gemini vision model.
+
+        Shares the key-rotation pool and rate-limit retry with :meth:`generate`
+        via :meth:`_call_with_key_rotation`; usage is recorded when the response
+        carries token counts. Returns the model's text (``""`` if it returned
+        none — the caller decides whether that is usable).
+        """
+
+        def _operation(api_key: str) -> str:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    prompt,
+                ],
+            )
+
+            usage = getattr(response, "usage_metadata", None)
+            if usage is not None:
+                self.tracker.record(
+                    stage=stage,
+                    model=model,
+                    prompt_tokens=usage.prompt_token_count or 0,
+                    output_tokens=usage.candidates_token_count or 0,
+                )
+            return response.text or ""
 
         return self._call_with_key_rotation(_operation)
 

@@ -1,8 +1,10 @@
 import io
+from unittest.mock import patch
 
 import docx as docx_lib
 import pymupdf
 
+from app.ingestion import pipeline as pipeline_mod
 from app.ingestion.pipeline import ingest_files
 
 
@@ -64,3 +66,94 @@ def test_all_valid_files_succeed_with_no_failures():
 
     assert len(result.failed) == 0
     assert len(result.succeeded) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Vision chunk_type preservation: chart / image_caption pieces bypass split(),
+# text / table pieces continue through it.
+# --------------------------------------------------------------------------- #
+def _run_with_pieces(pieces: list[dict], corpus_scope: str = "persistent"):
+    with patch.object(pipeline_mod, "route_file", return_value=pieces):
+        return ingest_files([("fig.pdf", b"stub")], corpus_scope=corpus_scope)
+
+
+def test_vision_chart_piece_survives_as_single_chart_chunk():
+    piece = {
+        "page": 4,
+        "location": None,
+        "text": (
+            "Chart type: bar chart. Title: Widgets shipped by year. "
+            "X-axis: year (2019-2021). Data points: 2019 = 10, 2020 = 20, 2021 = 25."
+        ),
+        "extraction_method": "vision",
+        "chunk_type": "chart",
+    }
+
+    result = _run_with_pieces([piece])
+
+    assert result.succeeded == ["fig.pdf"]
+    assert len(result.chunks) == 1
+    chunk = result.chunks[0]
+    assert chunk["chunk_type"] == "chart"  # not reclassified to "text"
+    assert chunk["extraction_method"] == "vision"
+    assert chunk["page"] == 4
+    assert chunk["source_doc"] == "fig.pdf"
+    assert chunk["corpus_scope"] == "persistent"
+    assert chunk["text"] == piece["text"]
+    assert chunk["chunk_id"]
+
+
+def test_vision_image_caption_piece_survives_as_single_caption_chunk():
+    piece = {
+        "page": 1,
+        "location": "Figure 2",
+        "text": "A schematic diagram of a centrifugal pump with labelled inlet and outlet.",
+        "extraction_method": "vision",
+        "chunk_type": "image_caption",
+    }
+
+    result = _run_with_pieces([piece])
+
+    assert len(result.chunks) == 1
+    chunk = result.chunks[0]
+    assert chunk["chunk_type"] == "image_caption"
+    assert chunk["extraction_method"] == "vision"
+    assert chunk["location"] == "Figure 2"
+    assert chunk["text"] == piece["text"]
+
+
+def test_vision_table_piece_still_goes_through_split_and_stays_table():
+    md_table = (
+        "| Year | Value |\n| --- | --- |\n| 2019 | 10 |\n| 2020 | 20 |\n| 2021 | 25 |"
+    )
+    piece = {
+        "page": 2,
+        "location": None,
+        "text": md_table,
+        "extraction_method": "vision",
+        "chunk_type": "table",
+    }
+
+    result = _run_with_pieces([piece])
+
+    table_chunks = [c for c in result.chunks if c["chunk_type"] == "table"]
+    assert len(table_chunks) == 1
+    assert table_chunks[0]["text"].strip() == md_table.strip()
+    assert table_chunks[0]["extraction_method"] == "vision"
+    assert table_chunks[0]["corpus_scope"] == "persistent"
+
+
+def test_vision_plain_text_piece_still_goes_through_split():
+    piece = {
+        "page": 1,
+        "location": None,
+        "text": "This is a sentence of transcribed body text that repeats. " * 60,
+        "extraction_method": "ocr",
+        "chunk_type": "text",
+    }
+
+    result = _run_with_pieces([piece])
+
+    assert len(result.chunks) > 1  # long text was chunked, not wrapped whole
+    assert all(c["chunk_type"] == "text" for c in result.chunks)
+    assert all(c["extraction_method"] == "ocr" for c in result.chunks)

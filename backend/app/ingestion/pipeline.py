@@ -1,7 +1,16 @@
+import uuid
 from dataclasses import dataclass, field
 
 from app.ingestion.router import UnsupportedFileType, route_file
 from app.ingestion.splitter import split
+
+# Vision pieces of these types are already short, self-contained structured
+# descriptions (a chart summary, a figure caption). Running them through split()
+# would only strip the chunk_type the vision extractor assigned and reclassify
+# them as plain "text", so they bypass split() and become one chunk directly.
+# "text" (plain transcriptions, OCR fallback) and "table" (markdown tables,
+# kept intact by the splitter's own table protection) still go through split().
+_ATOMIC_CHUNK_TYPES = {"chart", "image_caption"}
 
 
 @dataclass
@@ -47,7 +56,14 @@ def ingest_files(files: list[tuple[str, bytes]], corpus_scope: str) -> IngestRes
                     "location": piece.get("location"),
                     "extraction_method": piece.get("extraction_method"),
                 }
-                chunks = split(piece["text"], metadata)
+                if piece.get("chunk_type") in _ATOMIC_CHUNK_TYPES:
+                    chunks = (
+                        [_atomic_chunk(piece, metadata)]
+                        if piece["text"].strip()
+                        else []
+                    )
+                else:
+                    chunks = split(piece["text"], metadata)
                 for chunk in chunks:
                     chunk["corpus_scope"] = corpus_scope
                 result.chunks.extend(chunks)
@@ -58,3 +74,19 @@ def ingest_files(files: list[tuple[str, bytes]], corpus_scope: str) -> IngestRes
         result.succeeded.append(filename)
 
     return result
+
+
+def _atomic_chunk(piece: dict, metadata: dict) -> dict:
+    """Wrap a self-contained vision piece as a single chunk, mirroring the dict
+    shape produced by ``splitter._make_chunk`` and preserving the piece's
+    ``chunk_type`` (which ``split()`` would otherwise reclassify to ``"text"``).
+    """
+    return {
+        "chunk_id": str(uuid.uuid4()),
+        "text": piece["text"],
+        "source_doc": metadata["source_doc"],
+        "page": metadata["page"],
+        "location": metadata["location"],
+        "chunk_type": piece["chunk_type"],
+        "extraction_method": metadata["extraction_method"],
+    }
