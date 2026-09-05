@@ -34,8 +34,19 @@ async def ingest(files: list[UploadFile]):
 
     result = ingest_files(file_payloads, corpus_scope="persistent")
 
+    index = result.index
     return {
         "chunk_count": len(result.chunks),
+        "indexed": {
+            "total": index.total_indexed if index else 0,
+            "by_extraction_method": (
+                index.by_extraction_method
+                if index
+                else {"text": 0, "ocr": 0, "vision": 0}
+            ),
+            "vector_store_total": index.vector_store_total if index else 0,
+            "keyword_index_total": index.keyword_index_total if index else 0,
+        },
         "succeeded": result.succeeded,
         "failed": [
             {"filename": f.filename, "reason": f.reason} for f in result.failed

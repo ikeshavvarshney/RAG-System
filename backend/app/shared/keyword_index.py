@@ -68,6 +68,10 @@ class KeywordIndex:
         index.rebuild()
         return index
 
+    def __len__(self) -> int:
+        """Number of chunks currently in the index (0 before the first rebuild)."""
+        return len(self._chunk_ids)
+
     def rebuild(self) -> None:
         """Discard the current index and rebuild it from every chunk in the store."""
         chunks = self._store.all_chunks()

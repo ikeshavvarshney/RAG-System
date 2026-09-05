@@ -1,8 +1,11 @@
 import uuid
 from dataclasses import dataclass, field
 
+from app.ingestion.indexer import IndexResult, index_chunks
 from app.ingestion.router import UnsupportedFileType, route_file
 from app.ingestion.splitter import split
+from app.shared.keyword_index import KeywordIndex
+from app.shared.vector_store import VectorStore
 
 # Vision pieces of these types are already short, self-contained structured
 # descriptions (a chart summary, a figure caption). Running them through split()
@@ -24,14 +27,25 @@ class IngestResult:
     chunks: list = field(default_factory=list)
     succeeded: list = field(default_factory=list)
     failed: list = field(default_factory=list)
+    index: IndexResult | None = None
 
 
-def ingest_files(files: list[tuple[str, bytes]], corpus_scope: str) -> IngestResult:
-    """Run every file through routing, extraction, and splitting.
+def ingest_files(
+    files: list[tuple[str, bytes]],
+    corpus_scope: str,
+    *,
+    vector_store: VectorStore | None = None,
+    keyword_index: KeywordIndex | None = None,
+) -> IngestResult:
+    """Run every file through routing, extraction, splitting, then indexing.
 
     Per D-19: an unsupported, corrupt, or unreadable file is skipped with
     a clear per-file error, and the batch continues — one bad file in a
     40-document ingest must not kill the rest.
+
+    After all chunks are produced they are embedded and written to the vector
+    store + keyword index (see :func:`app.ingestion.indexer.index_chunks`);
+    ``vector_store`` / ``keyword_index`` default to the process singletons.
     """
     result = IngestResult()
 
@@ -73,6 +87,11 @@ def ingest_files(files: list[tuple[str, bytes]], corpus_scope: str) -> IngestRes
 
         result.succeeded.append(filename)
 
+    result.index = index_chunks(
+        result.chunks,
+        vector_store=vector_store,
+        keyword_index=keyword_index,
+    )
     return result
 
 
