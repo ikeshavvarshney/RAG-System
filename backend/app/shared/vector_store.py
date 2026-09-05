@@ -170,6 +170,20 @@ class VectorStore:
             )
         ]
 
+    def all_chunks(self) -> list[Chunk]:
+        """Return every stored chunk, fully reconstructed.
+
+        Used by the BM25 keyword index, which has no persistence of its own and
+        rebuilds from scratch off the vector store (D-22).
+        """
+        result = self._collection.get()
+        return [
+            _to_chunk(cid, doc, meta)
+            for cid, doc, meta in zip(
+                result["ids"], result["documents"], result["metadatas"]
+            )
+        ]
+
     def count(self) -> int:
         """Total number of vectors currently stored."""
         return self._collection.count()
