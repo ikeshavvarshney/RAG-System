@@ -77,11 +77,11 @@ Full diagrams and component descriptions: [03. System Architecture](docs/03-syst
 | Layer | Choice |
 |---|---|
 | Language model | Google Gemini (Pro for generation, Flash for auxiliary tasks and vision) |
-| Embeddings | Gemini `text-embedding-004` |
+| Embeddings | Gemini `gemini-embedding-001` |
 | Vector store | Chroma |
 | Keyword index | BM25 (`rank_bm25`) |
 | Reranker | Cross-encoder (`ms-marco-MiniLM-L-6-v2`, local) |
-| OCR | PaddleOCR with PP-Structure |
+| OCR | PaddleOCR (PP-Structure for RQ2 baseline runs), Tesseract fallback |
 | Backend | FastAPI + LangChain |
 | Frontend | Next.js + Tailwind CSS |
 | Evaluation | RAGAS |

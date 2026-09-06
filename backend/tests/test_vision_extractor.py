@@ -175,21 +175,58 @@ def test_rate_limit_pool_exhausted_falls_back_to_ocr(monkeypatch):
 # --------------------------------------------------------------------------- #
 # MAX_VISION_PAGES hard cap
 # --------------------------------------------------------------------------- #
-def test_batch_over_cap_fails_loudly_before_any_call(monkeypatch):
+def test_batch_over_cap_spends_budget_then_falls_back_to_ocr(monkeypatch):
+    """The cap bounds API spend, not how much of the file is read.
+
+    Every page must still come back: the first MAX_VISION_PAGES from vision,
+    the overflow from OCR. Failing the batch would discard the file's other
+    pages too, which is what D-19 forbids.
+    """
     monkeypatch.setattr(settings, "MAX_VISION_PAGES", 2)
 
-    called = {"n": 0}
+    calls = {"n": 0}
+
+    def _vision(**kw):
+        calls["n"] += 1
+        return "CONTENT_TYPE: figure\nA plain grey box."
+
+    monkeypatch.setattr(vision._client, "generate_vision", _vision)
+    monkeypatch.setattr(vision, "run_ocr", lambda image: "ocr over budget")
+
+    # Distinct colours per page: the vision cache is keyed on image bytes, so
+    # identical pages would collapse into one call and hide the budget count.
+    colours = ("red", "green", "blue", "yellow", "purple")
+    items = [
+        vision.VisionPage(image_bytes=_png(color=c), page=i)
+        for i, c in enumerate(colours)
+    ]
+    pieces = vision.extract_pages(items)
+
+    assert len(pieces) == 5
+    assert [p["extraction_method"] for p in pieces] == [
+        "vision", "vision", "ocr", "ocr", "ocr",
+    ]
+    assert calls["n"] == 2  # budget spent exactly once per allowed page
+    assert [p["page"] for p in pieces] == [0, 1, 2, 3, 4]
+    assert pieces[4]["text"] == "ocr over budget"
+
+
+def test_pages_within_cap_never_reach_ocr(monkeypatch):
+    monkeypatch.setattr(settings, "MAX_VISION_PAGES", 10)
     monkeypatch.setattr(
-        vision._client, "generate_vision", lambda **kw: called.__setitem__("n", called["n"] + 1)
+        vision._client, "generate_vision", lambda **kw: "CONTENT_TYPE: figure\nA plain grey box."
     )
-    items = [vision.VisionPage(image_bytes=_png(), page=i) for i in range(3)]
 
-    with pytest.raises(vision.VisionPageCapExceeded) as excinfo:
-        vision.extract_pages(items)
+    def _must_not_run(image):
+        raise AssertionError("OCR ran for a page inside the vision budget")
 
-    assert excinfo.value.selected == 3
-    assert excinfo.value.cap == 2
-    assert called["n"] == 0  # nothing dispatched
+    monkeypatch.setattr(vision, "run_ocr", _must_not_run)
+
+    pieces = vision.extract_pages(
+        [vision.VisionPage(image_bytes=_png(), page=i) for i in range(3)]
+    )
+
+    assert all(p["extraction_method"] == "vision" for p in pieces)
 
 
 def test_batch_at_cap_is_allowed(monkeypatch):

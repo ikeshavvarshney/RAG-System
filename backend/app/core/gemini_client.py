@@ -35,13 +35,19 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
 _EMBED_REQUEST_INTERVAL_SEC = 0.9
 
 
-# Vision-only SDK client options: a 15s per-request cap and NO SDK-internal
-# retry (default is 5 attempts with up to 60s backoff). On a throttled key a
-# vision call then fails within ~15s and drops to the OCR fallback (D-07)
-# instead of the SDK's own retry loop grinding for minutes. generate() and
-# embed_batch() build their clients separately and keep the SDK defaults.
+# Vision-only SDK client options: a per-request cap and NO SDK-internal retry
+# (default is 5 attempts with up to 60s backoff), so a wedged call drops to the
+# OCR fallback (D-07) instead of the SDK's own retry loop grinding for minutes.
+# generate() and embed_batch() build their clients separately and keep the SDK
+# defaults.
+#
+# The cap is 60s, not the 15s used previously. A throttled key was the failure
+# that 15s was meant to short-circuit, but throttling returns 429 immediately
+# and is already handled by key rotation; the cap only ever fired on healthy
+# calls. Transcribing one figure with _VISION_PROMPT measures ~30s, so 15s
+# timed out every vision call and silently degraded every figure to OCR.
 _VISION_HTTP_OPTIONS = types.HttpOptions(
-    timeout=15_000,  # milliseconds
+    timeout=60_000,  # milliseconds
     retry_options=types.HttpRetryOptions(attempts=1),
 )
 

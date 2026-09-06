@@ -10,7 +10,7 @@ A record of the significant technical decisions taken during design, with the re
 
 *Reasoning:* the deciding factor was operational rather than qualitative. Several providers offer comparable models on comparable free tiers. Serving generation, vision, and embeddings from one provider means one credential pool to rotate and one rate limit to reason about, rather than three interacting limits whose behaviour under load is difficult to predict. Reserving the larger model for generation alone materially reduces end-to-end latency, since the query pipeline performs several model calls in sequence.
 
-**D-02. Gemini `text-embedding-004` for embeddings.** Same provider and credential surface as the language models.
+**D-02. Gemini `gemini-embedding-001` for embeddings.** Same provider and credential surface as the language models.
 
 *Alternative considered:* larger open-weight embedding models achieve better retrieval benchmark results. Self-hosting one requires GPU memory beyond what is available. Recorded as a limitation in the research methodology rather than presented as a neutral choice.
 
@@ -42,7 +42,7 @@ A record of the significant technical decisions taken during design, with the re
 
 *Reasoning:* the two have genuinely different identity, and both the groundedness filter and the interface branch on the distinction. Representing it structurally rather than as nullable fields on a single type makes the branch explicit and checkable.
 
-**D-12. Structure-aware chunking targeting 300-500 tokens.** Segmentation at headings, paragraph breaks, and table blocks in preference to fixed offsets.
+**D-12. Structure-aware chunking targeting 500 tokens, bounded at 200 and 800.** Segmentation at headings, paragraph breaks, and table blocks in preference to fixed offsets.
 
 *Reasoning:* fixed-size splitting routinely divides a passage mid-sentence or mid-table, degrading both retrieval and the readability of quoted context. Tables are never split; an oversized intact table is more useful than two fragments. Token counts are measured with a tokeniser rather than approximated from character counts, since the two diverge substantially on dense text.
 
@@ -72,7 +72,7 @@ A record of the significant technical decisions taken during design, with the re
 
 **D-19. Per-file error isolation.** An unsupported, corrupt, or unreadable file is skipped with a recorded error; the remainder of the batch proceeds.
 
-*Reasoning:* ingesting a corpus of forty documents must not abort on the twelfth. Failures are reported per file with their cause.
+*Reasoning:* ingesting a corpus of fifty documents must not abort on the twelfth. Failures are reported per file with their cause, and each distinct cause reads differently: an oversized file is reported as too large rather than being passed on as empty bytes and surfacing as a corrupt document.
 
 **D-26. PyMuPDF for PDF handling.** Text extraction and page rasterisation from one library.
 
@@ -81,6 +81,10 @@ A record of the significant technical decisions taken during design, with the re
 **D-27. PaddleOCR with PP-Structure as the primary OCR engine; Tesseract as fallback.**
 
 *Reasoning:* driven by RQ2 more than by general accuracy. PP-Structure performs table structure recognition, recovering rows and columns rather than emitting words in reading order. With a structure-blind baseline, much of what RQ2 would measure is simply structured versus unstructured output, an unsurprising result for vision extraction that says little about the question of interest. A structure-aware baseline makes the comparison a genuine test of whether vision-language understanding adds value beyond accurate transcription. Tesseract is retained so that an unavailable primary engine does not block ingestion.
+
+*Amended after measurement.* PP-Structure costs roughly 75 seconds per page on this project's CPU-only hardware, against roughly 3 seconds for plain PaddleOCR recognition. The cost proved to be model-bound rather than resolution-bound: rendering pages at 100, 150, and 200 DPI produced 96, 75, and 81 seconds respectively, so it cannot be tuned away by sending smaller images. Disabling the seal, formula, and chart subpipelines and substituting the mobile detection and recognition models brought an initial 427 seconds per page down to that 75, which is as far as it goes without a GPU.
+
+Three engines are therefore wired as a cascade (PP-Structure, then PaddleOCR, then Tesseract) selected by `OCR_ENGINE`, and the *default* is plain PaddleOCR. PP-Structure remains the RQ2 baseline and is enabled for the runs that produce it, where hours of processing for one comparison is an acceptable cost paid once. It is not the default for ordinary ingestion, where the same cost buys nothing: vision handles figures and scanned pages, so OCR runs only on fallback, and a corpus ingested with a healthy vision path produces few or no OCR passages for structure recognition to improve. The decision's substance is unchanged, since RQ2's baseline is still structure-aware; what changed is that being structure-aware is a mode rather than the default.
 
 **D-28. Fast model for vision extraction, subject to empirical verification.** Both available models are compared against a sample of real corpus tables before the full corpus is processed; the selection is then held fixed.
 
@@ -158,5 +162,5 @@ Recorded for completeness, as each represents a design position that was reconsi
 | Command-line interface only | Full web application (FRONTEND-01 to FRONTEND-05) | A demonstrable interface materially improves the deliverable |
 | Deployment as a mandatory requirement | Future scope (DEPLOY-01, DEPLOY-02) | Scope growth elsewhere made an eight-week deployment commitment unrealistic; the core deliverable runs locally |
 | Hosted reranking API | Local cross-encoder (D-25) | Better latency, no rate limit, comparable quality at this scale |
-| Tesseract as primary OCR | PaddleOCR with PP-Structure (D-27) | A structure-aware baseline makes RQ2's comparison methodologically sound |
+| Tesseract as primary OCR | PaddleOCR, with PP-Structure as the opt-in RQ2 baseline (D-27) | A structure-aware baseline makes RQ2's comparison methodologically sound; measured cost keeps it out of the default path |
 | Fixed-size chunking | Structure-aware chunking (D-12) | Fixed offsets divide sentences and tables, degrading retrieval and quoted context |

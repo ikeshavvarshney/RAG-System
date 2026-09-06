@@ -12,10 +12,11 @@ Large-model inference is performed through hosted APIs. Two small models run loc
 |---|---|---|
 | Gemini Pro | API | Final answer generation with inline citations |
 | Gemini Flash | API | Vision extraction, query expansion, decomposition, conversational resolution, guardrails, sufficiency assessment |
-| Gemini `text-embedding-004` | API | Dense embeddings for passages and queries |
+| Gemini `gemini-embedding-001` | API | Dense embeddings for passages and queries |
 | `ms-marco-MiniLM-L-6-v2` | Local, CPU | Cross-encoder reranking |
-| PaddleOCR with PP-Structure | Local, CPU | OCR with table structure recognition |
-| Tesseract | Local, CPU | OCR fallback |
+| PaddleOCR | Local, CPU | OCR fallback for the vision path (default engine) |
+| PaddleOCR with PP-Structure | Local, CPU | Table structure recognition, opt-in for RQ2 baseline runs |
+| Tesseract | Local, CPU | Last-resort OCR |
 
 ### Selection rationale
 
@@ -28,6 +29,8 @@ Large-model inference is performed through hosted APIs. Two small models run loc
 **Local cross-encoder for reranking.** A 22-million-parameter cross-encoder executes in tens of milliseconds on CPU. A hosted reranking API was considered and rejected: it would have added a network round trip to every query, a third credential pool, and a third rate limit, in exchange for quality that the local model broadly matches at this corpus size. Should reranking prove to be the accuracy bottleneck during evaluation, a larger cross-encoder remains available as a drop-in replacement: more accurate, still CPU-viable, and measurably slower.
 
 **PaddleOCR over Tesseract as the primary OCR engine.** This choice is driven by RQ2 more than by general accuracy. PaddleOCR's PP-Structure component performs table structure recognition, recovering rows and columns rather than emitting words in reading order. With a structure-blind OCR engine as the comparison baseline, a substantial portion of what RQ2 would measure is simply structured output versus unstructured output, an unsurprising result for vision extraction that says little about the question of interest. A structure-aware OCR baseline makes the comparison genuinely informative. Tesseract is retained as a fallback so that an unavailable primary engine does not block ingestion.
+
+The three engines are wired as a cascade selected by `OCR_ENGINE`, each falling through to the next when unavailable. PP-Structure is not the default: it measures roughly 75 seconds per page on CPU against roughly 3 for plain recognition, so it is enabled for the RQ2 baseline runs that need recovered tables and left off for ordinary ingestion. See D-27 for the measurements behind that split.
 
 **Embedding model choice and its limitation.** Larger open-weight embedding models currently achieve better retrieval benchmark results than the hosted model used here. They were not adopted because self-hosting one requires GPU memory well beyond what is available. This is recorded as a limitation in the research methodology rather than presented as a neutral choice: retrieval results reported by this project are conditioned on one embedding model, and a stronger model would plausibly shift the baseline.
 
@@ -79,8 +82,8 @@ One consequence of this design is also recorded in the architecture document, an
 |---|---|
 | PyMuPDF | PDF text extraction and page rasterisation |
 | python-docx | DOCX body text and embedded image extraction |
-| PaddleOCR + PaddlePaddle | Primary OCR with table structure recognition |
-| pytesseract | OCR fallback |
+| PaddleOCR + PaddlePaddle | Default OCR engine; PP-Structure adds table structure recognition (`paddlex[ocr]` extra) |
+| pytesseract | Last-resort OCR |
 | Pillow | Image handling for OCR and vision extraction |
 
 **PyMuPDF** handles both text extraction and page-to-image rendering. The rendering capability is required for the scanned-document path: a PDF page carrying no text layer must be rasterised before OCR can process it. Alternative PDF libraries offer extraction but not rendering, which would have meant maintaining two libraries for one file type.

@@ -92,3 +92,75 @@ def test_ingest_failure_still_recorded_alongside_zeroed_index_breakdown():
     assert body["failed"][0]["filename"] == "notes.txt"
     assert body["indexed"]["total"] == 0
     assert body["indexed"]["by_extraction_method"] == {"text": 0, "ocr": 0, "vision": 0}
+
+# --------------------------------------------------------------------------- #
+# Request limits
+# --------------------------------------------------------------------------- #
+
+def test_batch_over_file_limit_is_rejected_with_413():
+    """An over-limit batch must be an error status, not a 200 carrying a note.
+
+    The uploader script checks the status code; a 200 with an "error" key
+    reads as a successful ingest that produced no chunks.
+    """
+    from app.api.routes.ingest import MAX_FILES_PER_REQUEST
+
+    client = TestClient(create_app())
+    files = [
+        ("files", (f"doc{i}.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf"))
+        for i in range(MAX_FILES_PER_REQUEST + 1)
+    ]
+
+    response = client.post("/api/ingest", files=files)
+
+    assert response.status_code == 413
+    assert str(MAX_FILES_PER_REQUEST) in response.json()["detail"]
+
+
+def test_file_limit_clears_the_research_corpus():
+    """The 50-document corpus is uploaded in one request (see docs/03)."""
+    from app.api.routes.ingest import MAX_FILES_PER_REQUEST
+
+    assert MAX_FILES_PER_REQUEST >= 50
+
+
+def test_oversized_file_is_reported_as_too_large_not_as_corrupt(monkeypatch):
+    """Size and corruption are different problems and must read differently."""
+    from app.api.routes import ingest as ingest_route
+
+    monkeypatch.setattr(ingest_route, "MAX_FILE_SIZE_BYTES", 10)
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/ingest",
+        files={"files": ("huge.pdf", io.BytesIO(b"x" * 50), "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    failed = response.json()["failed"]
+    assert len(failed) == 1
+    assert failed[0]["filename"] == "huge.pdf"
+    assert "too large" in failed[0]["reason"].lower()
+
+
+def test_oversized_file_does_not_block_the_rest_of_the_batch(monkeypatch):
+    """D-19: one rejected file must not cost the batch its valid documents."""
+    from app.api.routes import ingest as ingest_route
+
+    monkeypatch.setattr(ingest_route, "MAX_FILE_SIZE_BYTES", 5000)
+
+    pdf_bytes = _make_pdf_bytes("A valid PDF with plenty of real readable text content here.")
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/ingest",
+        files=[
+            ("files", ("huge.pdf", io.BytesIO(b"x" * 6000), "application/pdf")),
+            ("files", ("report.pdf", io.BytesIO(pdf_bytes), "application/pdf")),
+        ],
+    )
+
+    body = response.json()
+    assert "report.pdf" in body["succeeded"]
+    assert [f["filename"] for f in body["failed"]] == ["huge.pdf"]
+    assert body["chunk_count"] > 0

@@ -90,7 +90,13 @@ class VisionExtractionError(Exception):
 
 
 class VisionPageCapExceeded(VisionExtractionError):
-    """A vision batch selected more pages than ``settings.MAX_VISION_PAGES``."""
+    """A vision batch selected more pages than ``settings.MAX_VISION_PAGES``.
+
+    No longer raised by :func:`extract_pages`, which now spends the cap as a
+    budget and sends the overflow to OCR. Kept so a caller that still catches
+    it does not break, and so the name stays reserved for a genuinely fatal
+    cap should one be reintroduced.
+    """
 
     def __init__(self, selected: int, cap: int):
         self.selected = selected
@@ -130,23 +136,50 @@ def page_needs_vision(text: str, image_coverage: float) -> bool:
 # Extraction
 # --------------------------------------------------------------------------- #
 def extract_pages(items: list[VisionPage]) -> list[dict]:
-    """Run the vision pass over a batch, enforcing the page cap up front.
+    """Run the vision pass over a batch, spending MAX_VISION_PAGES as a budget.
 
-    The cap is checked before any API call so an over-limit batch fails loudly
-    rather than being silently truncated.
+    The cap bounds API spend on one file, not how much of the file is read.
+    The first ``MAX_VISION_PAGES`` pages get vision; the overflow goes straight
+    to OCR and is tagged ``extraction_method="ocr"``, so a 200-page scan yields
+    200 indexed pages of mixed quality rather than nothing at all.
+
+    This replaces an earlier hard refusal. Failing the batch discarded the
+    file's text pages too, which contradicts D-19 (one oversized file must not
+    cost the corpus that file) and D-07 (an unavailable vision path degrades to
+    OCR rather than dropping content). Budget order is page order: pages are
+    queued in document order, so the overflow is the tail of the document.
     """
-    if len(items) > settings.MAX_VISION_PAGES:
-        raise VisionPageCapExceeded(len(items), settings.MAX_VISION_PAGES)
-
-    return [
-        extract_image(
-            item.image_bytes,
-            page=item.page,
-            location=item.location,
-            mime_type=item.mime_type,
+    cap = settings.MAX_VISION_PAGES
+    if len(items) > cap:
+        logger.warning(
+            "vision batch of %d pages exceeds MAX_VISION_PAGES=%d; "
+            "pages beyond the cap fall back to OCR",
+            len(items),
+            cap,
         )
-        for item in items
-    ]
+
+    pieces: list[dict] = []
+    for position, item in enumerate(items):
+        if position < cap:
+            pieces.append(
+                extract_image(
+                    item.image_bytes,
+                    page=item.page,
+                    location=item.location,
+                    mime_type=item.mime_type,
+                )
+            )
+        else:
+            pieces.append(
+                _ocr_fallback(
+                    item.image_bytes,
+                    item.page,
+                    item.location,
+                    f"over MAX_VISION_PAGES={cap} budget for this file",
+                )
+            )
+
+    return pieces
 
 
 def extract_image(

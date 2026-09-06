@@ -8,49 +8,77 @@ The system comprises two pipelines that share a single storage layer. The **inge
 
 ```mermaid
 flowchart TD
-    UP["Upload<br/>PDF / DOCX / JPG / PNG"]
-    EP["Ingestion Endpoint"]
-    SCOPE{"Scope:<br/>persistent or session"}
-    UP --> EP --> SCOPE
+    UP["Upload<br/>PDF / DOCX / JPG / PNG<br/>max 60 files, 50 MB each"]
+    EP["POST /api/ingest"]
+    ROUTE{"Type routing<br/>magic-byte sniff"}
+    UP --> EP --> ROUTE
+    ROUTE -->|unsupported / corrupt| SKIP["Per-file error<br/>batch continues"]
 
-    SCOPE -->|"PDF / DOCX"| DOC["Document"]
-    SCOPE -->|"Image"| IMG["Image"]
+    ROUTE -->|PDF| PDFPAGE["Per page"]
+    ROUTE -->|DOCX| DOCX["Paragraphs + table cells"]
+    ROUTE -->|Image| IMG["Standalone image"]
 
-    DOC --> TEXTEX["Text-layer extraction"] --> SPLIT0["Structure-aware<br/>chunking"]
-    DOC --> VLM1["Vision model<br/>charts / tables"]
-    VLM1 -->|Success| SPLIT1["Structure-aware<br/>chunking"]
-    VLM1 -->|Failure| OCR1["OCR<br/>PP-Structure"] --> SPLIT1
+    PDFPAGE --> SCAN{"Text layer<br/>&ge; 50 chars?"}
+    SCAN -->|yes| TEXT["extraction_method=text"]
+    SCAN -->|"no, and a large<br/>image covers the page"| RENDER["Rasterise 150 DPI"]
+    SCAN -->|"no, sparse page"| TEXT
 
-    IMG --> VLM2["Vision model<br/>charts / tables"]
-    VLM2 -->|Success| SPLIT2["Structure-aware<br/>chunking"]
-    VLM2 -->|Failure| OCR2["OCR<br/>PP-Structure"] --> SPLIT2
+    RENDER --> BUDGET{"Within<br/>MAX_VISION_PAGES?"}
+    IMG --> VLM
+    BUDGET -->|yes| VLM["Gemini vision<br/>60s cap, cached by image"]
+    BUDGET -->|"no, over budget"| OCR
 
-    SPLIT0 --> MERGE["Merge passages"]
-    SPLIT1 --> MERGE
-    SPLIT2 --> MERGE
-    MERGE --> CHUNKS["Passages<br/>tagged by extraction method<br/>and scope"]
+    VLM -->|success| VIS["extraction_method=vision<br/>chunk_type: table / chart / image_caption"]
+    VLM -->|"timeout, quota,<br/>unusable reply"| OCR
 
-    CHUNKS --> EMB["Embedding model"]
-    CHUNKS --> KW["BM25 index"]
-    EMB --> VS[("Vector store")]
-    KW --> VS
+    subgraph OCRCASCADE["OCR cascade - each falls through when unavailable"]
+        direction LR
+        OCR["PP-StructureV3<br/>tables to markdown<br/>opt-in, ~75s/page"] -.-> OCR2["PaddleOCR<br/>~3s/page, default"] -.-> OCR3["Tesseract"]
+    end
+    OCR3 -->|all engines gone| FAIL["Per-file error<br/>batch continues"]
+    OCRCASCADE --> OCRD["extraction_method=ocr"]
+
+    DOCX --> TEXT
+    TEXT --> SPLIT["Structure-aware chunking<br/>200-800 tokens, target 500<br/>tables never split"]
+    OCRD --> SPLIT
+    VIS -->|"chart / image_caption<br/>already atomic"| CHUNKS
+    VIS -->|table / text| SPLIT
+
+    SPLIT --> CHUNKS["Passages<br/>tagged by extraction method,<br/>chunk_type, page, scope"]
+    CHUNKS --> EMB["Embedding<br/>batched, paced 0.9s/request"]
+    EMB --> VS[("Vector store<br/>Chroma")]
+    VS --> KW["BM25 keyword index<br/>rebuilt from the store"]
 ```
 
 ### Stage descriptions
 
-**Type routing (INGEST-01).** Incoming files are classified by extension and verified against their magic bytes, since a collected corpus is likely to contain mislabelled files. Unsupported or unreadable files are skipped with a recorded per-file error and the remainder of the batch continues: a single malformed document must not abort ingestion of forty valid ones.
+**Type routing (INGEST-01).** Incoming files are classified by extension and verified against their magic bytes, since a collected corpus is likely to contain mislabelled files. Content-Type is deliberately not consulted: browsers derive it from the extension, so it is wrong in exactly the case the check exists to catch. Unsupported or unreadable files are skipped with a recorded per-file error and the remainder of the batch continues: a single malformed document must not abort ingestion of forty-nine valid ones. A file over the 50 MB limit is reported as too large rather than passed on as empty bytes, so the uploader is not told a document is corrupt when it is merely big.
 
 **Text-layer extraction.** PDFs are processed page by page, preserving page numbers, which every corpus citation depends on. DOCX files yield both paragraph text and table-cell text; the latter is not present in the document's paragraph collection and must be walked separately.
 
-**Scanned-document detection.** A PDF page whose extracted character count falls below a threshold is treated as image-only. It is rasterised and passed to OCR. The decision is made per page rather than per document, since documents mixing digital and scanned pages are common.
+**Scanned-document detection.** A PDF page qualifies for the image path on two conditions together: fewer than 50 extractable characters, and a placed raster image covering a large fraction of the page. Both are required because a genuinely sparse page (a section divider, a mostly blank form page) has little text but nothing to look at, and rendering it would spend a vision call transcribing whitespace; its text stands as-is. A qualifying page is rasterised at 150 DPI and goes to vision, not straight to OCR. The decision is made per page rather than per document, since documents mixing digital and scanned pages are common.
 
-**Vision extraction (INGEST-02).** Page images and standalone images are submitted to a vision-language model with a prompt requesting structured output: tables transcribed as markdown preserving row and column relationships, and charts described by type, axes, and readable data points. An unstructured prose description is of little retrieval value; the structure is what makes a table's contents matchable against a question.
+**Vision extraction (INGEST-02).** Page images and standalone images are submitted to a vision-language model with a prompt requesting structured output: tables transcribed as markdown preserving row and column relationships, and charts described by type, axes, and readable data points. An unstructured prose description is of little retrieval value; the structure is what makes a table's contents matchable against a question. The model classifies its own output, and that classification becomes the passage's `chunk_type` (`table`, `chart`, or `image_caption`). Charts and captions are already short and self-contained, so they bypass chunking and become one passage directly.
 
-**OCR fallback.** When vision extraction fails, times out, or exhausts the rate limit, the passage is produced by OCR instead. The OCR engine performs table structure recognition, so tabular content survives this path with its layout intact rather than being flattened to reading-order text. Every fallback is logged with its cause.
+Two limits bound this stage. Each request is capped at 60 seconds with no SDK-internal retry: long enough for a real transcription, measured at roughly 15 to 30 seconds per figure, while still failing over to OCR rather than stalling a batch. Responses are cached by image content, so re-ingesting a document does not pay for its figures twice. A throttled key is a separate matter, handled by rotation rather than by the timeout: the API reports a rate limit immediately, and the request is retried against the next key in the pool with exponential backoff.
 
-**Structure-aware chunking (INGEST-03).** Passages target 300-500 tokens, split at structural boundaries (headings, paragraph breaks, table blocks) in preference to fixed offsets. A table is never split mid-table; an oversized intact table is more useful than two fragments of one. The nearest enclosing heading is carried into passage metadata, which materially improves retrieval on structured documents.
+**Vision budget.** `MAX_VISION_PAGES` bounds how many pages of one document reach the model. Pages beyond it fall through to OCR instead of failing the document, so a several-hundred-page scan yields a fully indexed document of mixed extraction quality rather than nothing at all. The budget bounds spend, not how much of a document is read.
 
-**Dual indexing (INGEST-04).** Every passage is embedded into the vector store and simultaneously added to the BM25 keyword index. One passage, two indexes, one identifier.
+**OCR fallback (D-27).** When vision extraction fails, times out, returns nothing usable, or the page is over the vision budget, the passage is produced by OCR instead. Three engines form a cascade, each falling through to the next when it is unavailable, and every fallback is logged with its cause:
+
+| Engine | Cost per page | Role |
+| --- | --- | --- |
+| PP-StructureV3 | ~75s (CPU) | Layout analysis and table structure recognition. Tables are returned as markdown, so a recovered table keeps its rows and columns rather than being flattened to reading order. This is RQ2's structure-aware baseline. |
+| PaddleOCR | ~3s | Plain text recognition in reading order. The default. |
+| Tesseract | ~1s | Last resort, so an unavailable paddle does not cost the page entirely. |
+
+The engine is selected by `OCR_ENGINE`, and the default is plain PaddleOCR rather than PP-Structure. This is a deliberate departure from always taking the most capable engine: at roughly 75 seconds per page, structure recognition over the full corpus takes hours, and measurement shows the cost is model-bound rather than resolution-bound, so it cannot be tuned away by rendering smaller pages. PP-Structure is therefore enabled for the RQ2 baseline runs that need recovered tables and left off for ordinary ingestion. A page is lost only when every engine is unavailable, which is reported as a per-file error.
+
+Note that in normal operation this path runs rarely. Vision handles figures and scanned pages, so OCR is genuinely a fallback: a corpus ingested with a healthy vision path produces few or no `ocr` passages.
+
+**Structure-aware chunking (INGEST-03).** Passages target 500 tokens and are bounded at 200 and 800 (`CHUNK_TARGET_TOKENS`, `CHUNK_MIN_TOKENS`, `CHUNK_MAX_TOKENS`), measured with a tiktoken `cl100k_base` length function. Splits fall on structural boundaries (headings, paragraph breaks, table blocks) in preference to fixed offsets. A run of two or more consecutive markdown table rows is detected as a table and emitted whole as a `chunk_type="table"` passage even when it exceeds the maximum: an oversized intact table is more useful than two fragments of one. This is why the OCR path converts recovered tables to markdown pipe syntax rather than leaving them as HTML, and it is what connects table structure recognition to anything downstream. The nearest preceding markdown heading is carried into each passage's `location` field, which materially improves retrieval on structured documents.
+
+**Dual indexing (INGEST-04).** Passages are embedded in batches, and each batch is written to the vector store as soon as it succeeds, so a failure partway through a long document does not discard the passages already embedded. Embedding requests are paced, because the embedding API issues one request per text rather than a true batch call, which would otherwise breach the free-tier ceiling. The BM25 keyword index is then rebuilt once from the vector store. Deriving it from the store rather than writing both in parallel is what makes the two indexes share one identifier per passage by construction: the keyword index cannot drift from the store it is built from. One passage, two indexes, one identifier.
 
 ---
 
@@ -183,9 +211,15 @@ Both the groundedness filter and the user interface branch on this distinction, 
 backend/
   app/
     main.py              Application factory
-    core/                Configuration, API key rotation
+    core/                Configuration, API key rotation, Gemini client
     api/routes/          HTTP endpoints
-    ingestion/           Extraction, chunking, indexing
+    ingestion/
+      router.py          Type routing by magic bytes
+      extractors/        pdf, docx, image, vision, ocr, paddle_ocr
+      splitter.py        Structure-aware chunking
+      embedder.py        Batched, paced embedding
+      indexer.py         Vector store + keyword index writes
+      pipeline.py        Stage orchestration, per-file error isolation
     query/               Guardrails, retrieval, fusion, generation
     shared/              Passage schema, vector store, keyword index
   tests/

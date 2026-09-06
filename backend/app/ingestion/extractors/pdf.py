@@ -48,9 +48,10 @@ def extract(content: bytes, filename: str):
     doc.close()
 
     if vision_queue:
-        # extract_pages enforces MAX_VISION_PAGES and may raise
-        # VisionExtractionError; both propagate for the pipeline to isolate
-        # per-file (D-19).
+        # extract_pages spends MAX_VISION_PAGES as a budget, sending overflow
+        # pages to OCR rather than failing. It still raises
+        # VisionExtractionError when a page has no usable output from either
+        # engine; that propagates for the pipeline to isolate per-file (D-19).
         pages.extend(vision.extract_pages(vision_queue))
 
     pages.sort(key=lambda piece: piece["page"])
