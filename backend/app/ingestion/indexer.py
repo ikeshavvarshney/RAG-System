@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from itertools import batched
 
-from app.ingestion.embedder import embed_chunks
+from app.ingestion.embedder import EMBED_BATCH_SIZE, embed_chunks
 from app.shared.keyword_index import KeywordIndex
 from app.shared.schemas.chunk import Chunk
 from app.shared.vector_store import VectorStore
@@ -53,12 +54,19 @@ def get_keyword_index() -> KeywordIndex:
 
 @dataclass
 class IndexResult:
-    """What one :func:`index_chunks` call wrote, plus current store totals."""
+    """What one :func:`index_chunks` call wrote, plus current store totals.
+
+    ``failed_chunks`` / ``failure_reason`` are set when a batch failed partway
+    through: everything up to that batch is already persisted, the rest of this
+    run's chunks were not embedded, and the caller can report / resume.
+    """
 
     total_indexed: int = 0
     by_extraction_method: dict[str, int] = field(
         default_factory=lambda: {method: 0 for method in _EXTRACTION_METHODS}
     )
+    failed_chunks: int = 0
+    failure_reason: str | None = None
     vector_store_total: int = 0
     keyword_index_total: int = 0
 
@@ -68,12 +76,17 @@ def index_chunks(
     vector_store: VectorStore | None = None,
     keyword_index: KeywordIndex | None = None,
 ) -> IndexResult:
-    """Embed ``chunks``, upsert them into the vector store, rebuild the keyword
-    index, and report what was written.
+    """Embed ``chunks`` batch by batch, upserting each batch into the vector
+    store as soon as it succeeds, then rebuild the keyword index once.
 
-    Idempotent: upsert is keyed by ``chunk_id`` (re-indexing the same chunks
-    updates in place, never duplicates), and the BM25 rebuild always reflects
-    the current Chroma state afterwards.
+    Partial-failure tolerant: if a batch's embed or upsert raises, every batch
+    already persisted stays persisted — only this run's unembedded remainder is
+    lost. The returned :class:`IndexResult` reports ``total_indexed`` vs
+    ``failed_chunks`` (+ ``failure_reason``) so the caller reports it honestly;
+    ``index_chunks`` does not re-raise.
+
+    Idempotent: upsert is keyed by ``chunk_id``. The BM25 rebuild (D-22: full,
+    never incremental) runs once at the end, over whatever is in Chroma by then.
 
     ``vector_store`` / ``keyword_index`` default to the process singletons; pass
     explicit instances in tests.
@@ -83,29 +96,50 @@ def index_chunks(
 
     models = [_as_chunk(item) for item in chunks]
 
-    if models:
-        pairs = embed_chunks(models)
-        stored = store.upsert(pairs)
-        # D-22: full rebuild after the mutation, never an incremental update.
+    indexed: list[Chunk] = []
+    failure_reason: str | None = None
+    mutated = False
+
+    for batch in batched(models, EMBED_BATCH_SIZE):
+        try:
+            pairs = embed_chunks(list(batch))
+            stored = store.upsert(pairs)  # persist this batch immediately
+        except Exception as exc:  # noqa: BLE001 - report, don't abort (cf. D-19)
+            failure_reason = f"{type(exc).__name__}: {exc}"
+            logger.warning(
+                "index_chunks: batch failed after %d/%d chunks persisted; "
+                "keeping earlier batches. %s",
+                len(indexed),
+                len(models),
+                failure_reason,
+            )
+            break
+        indexed.extend(stored)
+        mutated = True
+
+    if mutated:
+        # D-22: one full rebuild from whatever is now in Chroma, not per batch.
         kw_index.rebuild()
-    else:
-        stored = []
 
     counts = {method: 0 for method in _EXTRACTION_METHODS}
-    for chunk in stored:
+    for chunk in indexed:
         counts[chunk.extraction_method] = counts.get(chunk.extraction_method, 0) + 1
 
     result = IndexResult(
-        total_indexed=len(stored),
+        total_indexed=len(indexed),
         by_extraction_method=counts,
+        failed_chunks=len(models) - len(indexed),
+        failure_reason=failure_reason,
         vector_store_total=store.count(),
         keyword_index_total=len(kw_index),
     )
     logger.info(
-        "indexed %d chunks (%s); store now holds %d",
+        "indexed %d/%d chunks (%s); store holds %d%s",
         result.total_indexed,
+        len(models),
         ", ".join(f"{m}={counts[m]}" for m in _EXTRACTION_METHODS),
         result.vector_store_total,
+        f"; {result.failed_chunks} lost to {failure_reason}" if failure_reason else "",
     )
     return result
 

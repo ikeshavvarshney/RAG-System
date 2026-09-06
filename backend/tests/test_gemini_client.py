@@ -168,6 +168,27 @@ def test_embed_batch_rotates_key_and_retries_on_rate_limit(monkeypatch):
 
     vectors = client.embed_batch(["x", "y"], model="text-embedding-004")
 
-    assert attempts["n"] == 2  # one failure, one success
+    # per-text: 1st request fails -> whole _operation retried on key-b -> then
+    # both texts embed (n reaches 3).
+    assert attempts["n"] == 3
     assert used_keys == ["key-a", "key-b"]  # rotated to the next key on retry
     assert len(vectors) == 2 and len(vectors[0]) == 768
+
+
+def test_embed_batch_paces_between_requests(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    monkeypatch.setattr(gc, "_EMBED_REQUEST_INTERVAL_SEC", 0.01)
+    slept: list[float] = []
+    monkeypatch.setattr(gc.time, "sleep", lambda s: slept.append(s))
+
+    with patch("app.core.gemini_client.GoogleGenerativeAIEmbeddings") as mock_emb_cls:
+        mock_emb_cls.return_value.embed_documents.side_effect = lambda texts: [
+            [0.0] * 4 for _ in texts
+        ]
+        vectors = GeminiClient(backoff_base=0).embed_batch(
+            ["a", "b", "c", "d"], model="gemini-embedding-001"
+        )
+
+    assert len(vectors) == 4
+    assert mock_emb_cls.return_value.embed_documents.call_count == 4  # one per text
+    assert slept == [0.01, 0.01, 0.01]  # 3 gaps between 4 requests

@@ -138,6 +138,67 @@ def test_get_stores_are_lazy_process_singletons(monkeypatch):
     assert indexer.get_keyword_index() is indexer.get_keyword_index()
 
 
+def test_successful_run_reports_no_failure(stores):
+    vector_store, keyword_index = stores
+
+    result = index_chunks([_chunk_dict("all good here")], vector_store, keyword_index)
+
+    assert result.total_indexed == 1
+    assert result.failed_chunks == 0
+    assert result.failure_reason is None
+
+
+def test_partial_failure_persists_earlier_batches_and_reports_the_split(stores, monkeypatch):
+    from app.ingestion.indexer import EMBED_BATCH_SIZE
+
+    vector_store, keyword_index = stores
+    total = EMBED_BATCH_SIZE * 3
+    chunks = [_chunk_dict(f"batch payload number {i}") for i in range(total)]
+
+    stub_embed = indexer.embed_chunks  # conftest's deterministic stub
+    call = {"n": 0}
+
+    def flaky(batch):
+        call["n"] += 1
+        if call["n"] == 2:  # second batch of three blows up
+            raise RuntimeError("429 RESOURCE_EXHAUSTED (simulated)")
+        return stub_embed(batch)
+
+    monkeypatch.setattr(indexer, "embed_chunks", flaky)
+
+    result = index_chunks(chunks, vector_store, keyword_index)
+
+    # stopped at the failing batch; batch 1 stays persisted, batches 2+3 lost
+    assert call["n"] == 2
+    assert result.total_indexed == EMBED_BATCH_SIZE
+    assert result.failed_chunks == total - EMBED_BATCH_SIZE
+    assert result.failure_reason is not None and "429" in result.failure_reason
+    assert sum(result.by_extraction_method.values()) == EMBED_BATCH_SIZE
+
+    # batch 1's chunks are really in the store (not rolled back), index rebuilt once
+    assert vector_store.count() == EMBED_BATCH_SIZE
+    assert len(keyword_index) == EMBED_BATCH_SIZE
+    assert result.vector_store_total == EMBED_BATCH_SIZE
+    assert result.keyword_index_total == EMBED_BATCH_SIZE
+
+
+def test_index_chunks_does_not_reraise_on_batch_failure(stores, monkeypatch):
+    vector_store, keyword_index = stores
+
+    def boom(_batch):
+        raise RuntimeError("total embed outage")
+
+    monkeypatch.setattr(indexer, "embed_chunks", boom)
+
+    # must return a result, not propagate
+    result = index_chunks([_chunk_dict("x"), _chunk_dict("y")], vector_store, keyword_index)
+
+    assert result.total_indexed == 0
+    assert result.failed_chunks == 2
+    assert "total embed outage" in result.failure_reason
+    assert vector_store.count() == 0
+
+
 def test_index_chunks_defaults_to_the_singletons():
     chunks = [_chunk_dict("chunk written to the default stores")]
 

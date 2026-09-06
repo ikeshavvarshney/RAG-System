@@ -17,6 +17,14 @@ def clear_key_pool_env(monkeypatch):
     monkeypatch.delenv("TAVILY_API_KEYS", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def no_embed_pacing(monkeypatch):
+    """Zero the embed-request pacing sleep so tests never actually wait on it."""
+    from app.core import gemini_client
+
+    monkeypatch.setattr(gemini_client, "_EMBED_REQUEST_INTERVAL_SEC", 0.0, raising=False)
+
+
 def _stub_vector(text: str, dim: int = 8) -> list[float]:
     """Deterministic, cheap, non-zero embedding stand-in."""
     seed = sum(bytearray(text.encode("utf-8"))) % 97 or 1

@@ -46,14 +46,14 @@ def mock_embeddings():
         yield mock_cls.return_value
 
 
-def test_batch_of_50_chunks_issues_few_calls_not_fifty(isolated_cache, mock_embeddings):
+def test_batch_of_50_chunks_embeds_each_unique_text_once(isolated_cache, mock_embeddings):
     chunks = [_chunk(f"distinct chunk body number {i}") for i in range(50)]
 
     out = embed_chunks(chunks)
 
     assert len(out) == 50
-    # 50 texts, batch size 64 -> a single API call.
-    assert mock_embeddings.embed_documents.call_count == 1
+    # One embedContent request per unique text (the API is not a true batch).
+    assert mock_embeddings.embed_documents.call_count == 50
     assert all(len(vec) == DIM for _, vec in out)
 
 
@@ -85,10 +85,19 @@ def test_batching_splits_when_over_batch_size(isolated_cache, mock_embeddings, m
     monkeypatch.setattr(embedder, "EMBED_BATCH_SIZE", 10)
     chunks = [_chunk(f"row {i}") for i in range(25)]
 
+    batch_sizes: list[int] = []
+    real_embed_batch = embedder._client.embed_batch
+    monkeypatch.setattr(
+        embedder._client,
+        "embed_batch",
+        lambda texts, model: (batch_sizes.append(len(texts)), real_embed_batch(texts, model))[1],
+    )
+
     out = embed_chunks(chunks)
 
     assert len(out) == 25
-    assert mock_embeddings.embed_documents.call_count == 3  # 10 + 10 + 5
+    assert batch_sizes == [10, 10, 5]  # _embed_texts still slices by EMBED_BATCH_SIZE
+    assert mock_embeddings.embed_documents.call_count == 25  # one request per text
 
 
 def test_duplicate_texts_are_embedded_once(isolated_cache, mock_embeddings):
@@ -108,21 +117,21 @@ def test_cache_hit_issues_zero_additional_calls(isolated_cache, mock_embeddings)
     chunks = [_chunk("cacheable content one"), _chunk("cacheable content two")]
 
     first = embed_chunks(chunks)
-    assert mock_embeddings.embed_documents.call_count == 1
+    assert mock_embeddings.embed_documents.call_count == 2  # one per unique text
 
     second = embed_chunks([_chunk("cacheable content one"), _chunk("cacheable content two")])
 
-    assert mock_embeddings.embed_documents.call_count == 1  # served entirely from disk
+    assert mock_embeddings.embed_documents.call_count == 2  # served entirely from disk
     assert [v for _, v in first] == [v for _, v in second]
 
 
 def test_partial_cache_only_embeds_the_misses(isolated_cache, mock_embeddings):
     embed_chunks([_chunk("warm one"), _chunk("warm two")])
-    assert mock_embeddings.embed_documents.call_count == 1
+    assert mock_embeddings.embed_documents.call_count == 2
 
     embed_chunks([_chunk("warm one"), _chunk("cold three"), _chunk("warm two")])
 
-    assert mock_embeddings.embed_documents.call_count == 2
+    assert mock_embeddings.embed_documents.call_count == 3  # only the miss
     assert mock_embeddings.embed_documents.call_args.args[0] == ["cold three"]
 
 
@@ -179,6 +188,8 @@ def test_rate_limit_triggers_rotation_and_retry_not_raise(isolated_cache):
     with patch.object(gc, "GoogleGenerativeAIEmbeddings", FakeEmbeddings):
         out = embed_chunks([_chunk("needs a retry"), _chunk("second text")])
 
-    assert attempts["n"] == 2  # failed once, retried, succeeded
+    # per-text loop: text1 fails (n=1) -> whole _operation retried on key-b ->
+    # text1 ok (n=2), text2 ok (n=3).
+    assert attempts["n"] == 3
     assert used_keys == ["key-a", "key-b"]  # rotated to the next key
     assert len(out) == 2 and all(len(v) == DIM for _, v in out)

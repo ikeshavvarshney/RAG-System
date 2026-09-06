@@ -44,6 +44,8 @@ async def ingest(files: list[UploadFile]):
                 if index
                 else {"text": 0, "ocr": 0, "vision": 0}
             ),
+            "failed": index.failed_chunks if index else 0,
+            "failure_reason": index.failure_reason if index else None,
             "vector_store_total": index.vector_store_total if index else 0,
             "keyword_index_total": index.keyword_index_total if index else 0,
         },

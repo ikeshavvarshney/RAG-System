@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = "./data/chroma"
 
     #---Vision & Embedding (Week 3) ---
-    EMBEDDING_MODEL: str = "text-embedding-004"
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
     VISION_MODEL: str = "gemini-3.6-flash"
     MAX_VISION_PAGES: int = 80
     EMBEDDING_CACHE_DIR: str = "./data/cache/embeddings"

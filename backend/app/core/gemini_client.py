@@ -28,6 +28,24 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     return any(marker in blob for marker in _RATE_LIMIT_MARKERS)
 
 
+# langchain's GoogleGenerativeAIEmbeddings issues one embedContent request per
+# text (not a true batch call), so embed_batch() paces itself with this gap
+# between requests to stay under the free-tier embedding ceiling (100/min) with
+# headroom: 0.9s -> ~66 req/min. Tune here; the test suite sets it to 0.
+_EMBED_REQUEST_INTERVAL_SEC = 0.9
+
+
+# Vision-only SDK client options: a 15s per-request cap and NO SDK-internal
+# retry (default is 5 attempts with up to 60s backoff). On a throttled key a
+# vision call then fails within ~15s and drops to the OCR fallback (D-07)
+# instead of the SDK's own retry loop grinding for minutes. generate() and
+# embed_batch() build their clients separately and keep the SDK defaults.
+_VISION_HTTP_OPTIONS = types.HttpOptions(
+    timeout=15_000,  # milliseconds
+    retry_options=types.HttpRetryOptions(attempts=1),
+)
+
+
 class GeminiClient:
     """Single wrapper owning key rotation + usage recording for every
     Gemini call. A call that bypasses this wrapper bypasses both —
@@ -49,15 +67,19 @@ class GeminiClient:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
 
-    def _call_with_key_rotation(self, operation):
+    def _call_with_key_rotation(self, operation, *, max_retries: int | None = None):
         """Run ``operation(api_key)``; on a rate-limit error rotate to the next
         key and retry with exponential backoff.
 
-        Up to ``max_retries`` additional attempts are made. Non-rate-limit
-        errors are re-raised on the spot; if every attempt is rate-limited the
-        last such error is re-raised.
+        Up to ``max_retries`` additional attempts are made (falling back to
+        ``self.max_retries`` when the argument is ``None``), so a call site that
+        should fail fast — e.g. the vision path against a throttled key, which
+        then falls back to OCR — can lower it without affecting the others.
+        Non-rate-limit errors are re-raised on the spot; if every attempt is
+        rate-limited the last such error is re-raised.
         """
-        attempts = self.max_retries + 1
+        retries = self.max_retries if max_retries is None else max_retries
+        attempts = retries + 1
         last_exc: BaseException | None = None
 
         for attempt in range(attempts):
@@ -102,17 +124,21 @@ class GeminiClient:
         prompt: str,
         image_bytes: bytes,
         mime_type: str,
+        *,
+        max_retries: int | None = None,
     ) -> str:
         """Send one image + text prompt to a Gemini vision model.
 
         Shares the key-rotation pool and rate-limit retry with :meth:`generate`
-        via :meth:`_call_with_key_rotation`; usage is recorded when the response
-        carries token counts. Returns the model's text (``""`` if it returned
-        none — the caller decides whether that is usable).
+        via :meth:`_call_with_key_rotation`; ``max_retries`` overrides the
+        rotation retry budget for this call only (the vision path passes a low
+        value so it fails fast to OCR when the key is throttled). Usage is
+        recorded when the response carries token counts. Returns the model's
+        text (``""`` if it returned none — the caller decides usability).
         """
 
         def _operation(api_key: str) -> str:
-            client = genai.Client(api_key=api_key)
+            client = genai.Client(api_key=api_key, http_options=_VISION_HTTP_OPTIONS)
             response = client.models.generate_content(
                 model=model,
                 contents=[
@@ -131,14 +157,16 @@ class GeminiClient:
                 )
             return response.text or ""
 
-        return self._call_with_key_rotation(_operation)
+        return self._call_with_key_rotation(_operation, max_retries=max_retries)
 
     def embed_batch(self, texts: list[str], model: str) -> list[list[float]]:
         """Embed a batch of texts, returning one vector per input, in order.
 
         Shares the key-rotation pool and rate-limit retry with :meth:`generate`.
-        The embeddings API returns no token counts, so — per D-32: record real
-        numbers or none — no usage is recorded here.
+        Because the underlying API is one request per text, this sleeps
+        ``_EMBED_REQUEST_INTERVAL_SEC`` between requests to stay under the
+        free-tier per-minute cap. The embeddings API returns no token counts, so
+        — per D-32: record real numbers or none — no usage is recorded here.
         """
         if not texts:
             return []
@@ -149,6 +177,11 @@ class GeminiClient:
             embeddings = GoogleGenerativeAIEmbeddings(
                 model=model_id, google_api_key=api_key
             )
-            return embeddings.embed_documents(texts)
+            vectors: list[list[float]] = []
+            for i, text in enumerate(texts):
+                if i and _EMBED_REQUEST_INTERVAL_SEC > 0:
+                    time.sleep(_EMBED_REQUEST_INTERVAL_SEC)
+                vectors.extend(embeddings.embed_documents([text]))
+            return vectors
 
         return self._call_with_key_rotation(_operation)

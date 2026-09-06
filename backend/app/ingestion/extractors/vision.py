@@ -50,6 +50,12 @@ LARGE_IMAGE_COVERAGE = 0.50
 # Shortest model response we will treat as a usable transcription.
 _MIN_USABLE_CHARS = 12
 
+# Key-rotation retry budget for a single vision call. Kept low (2 total
+# attempts) on purpose: when the key pool is quota-throttled we want to fail
+# fast to the OCR fallback (D-07) rather than burn minutes on backoff. The OCR
+# tagging (extraction_method="ocr", chunk_type="text") is unchanged.
+_VISION_MAX_RETRIES = 1
+
 _VISION_PROMPT = (
     "You are transcribing a figure from a document for a retrieval system.\n"
     "The FIRST line of your reply must be exactly one of:\n"
@@ -175,6 +181,7 @@ def extract_image(
             prompt=_VISION_PROMPT,
             image_bytes=image_bytes,
             mime_type=mime_type,
+            max_retries=_VISION_MAX_RETRIES,
         )
     except Exception as exc:  # includes rate-limit pool exhausted (re-raised)
         fail_reason = f"vision call failed: {type(exc).__name__}: {exc}"
