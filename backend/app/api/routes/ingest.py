@@ -120,6 +120,62 @@ async def create_session():
     return {"session_id": new_session_id()}
 
 
+@router.get("/session/{session_id}/documents")
+async def list_session_documents(session_id: str):
+    """What this session currently holds.
+
+    The frontend keeps its uploaded-document list in component state, which a
+    page reload discards; this is how it recovers. There is deliberately no
+    endpoint that enumerates *all* sessions: with no authentication the id is
+    the only thing protecting a session, so listing ids would hand every
+    visitor everyone else's uploads.
+    """
+    try:
+        validate_issued_session_id(session_id)
+        vector_store, _ = get_session_stores(session_id)
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "session_id": session_id,
+        "documents": [
+            {
+                "source_doc": doc.source_doc,
+                "chunk_count": doc.chunk_count,
+                "pages": doc.pages,
+                "extraction_methods": doc.extraction_methods,
+            }
+            for doc in vector_store.documents()
+        ],
+    }
+
+
+@router.delete("/session/{session_id}/documents/{source_doc:path}")
+async def delete_session_document(session_id: str, source_doc: str):
+    """Remove one uploaded document from a session (USERDOC-02).
+
+    ``source_doc`` is a filename and may contain characters that need escaping
+    in a URL, so the path converter is used to take it whole. It never becomes
+    a filesystem path: it is only ever matched against chunk metadata.
+    """
+    try:
+        validate_issued_session_id(session_id)
+        vector_store, keyword_index = get_session_stores(session_id)
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    removed = vector_store.delete_by_document(source_doc, scope_for(session_id))
+    if removed:
+        # D-22: BM25 is rebuilt in full after any mutation, never patched.
+        keyword_index.rebuild()
+
+    return {
+        "session_id": session_id,
+        "source_doc": source_doc,
+        "deleted_chunks": len(removed),
+    }
+
+
 @router.delete("/session/{session_id}")
 async def delete_session(session_id: str):
     """Drop a session's uploads entirely (USERDOC-02, whole-session form).

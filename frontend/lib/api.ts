@@ -61,6 +61,30 @@ export type IngestTarget = "corpus" | "session";
 
 const SESSION_KEY = "rag.session_id";
 
+// localStorage, not sessionStorage: sessionStorage is cleared when the tab
+// closes, which loses the id while the server still holds the uploads. The
+// store then survives, unreachable, until it expires. Remembering the id keeps
+// a session's own uploads deletable by the only party entitled to delete them.
+// The tradeoff is that uploads outlive the tab on a shared machine, which the
+// server-side TTL bounds.
+function readStoredId(): string | null {
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    // Private mode, or site data blocked.
+    return null;
+  }
+}
+
+function writeStoredId(sessionId: string | null): void {
+  try {
+    if (sessionId === null) localStorage.removeItem(SESSION_KEY);
+    else localStorage.setItem(SESSION_KEY, sessionId);
+  } catch {
+    // A session that cannot be remembered still works for this page view.
+  }
+}
+
 /**
  * The current session id, asking the backend for one on first use.
  *
@@ -69,7 +93,7 @@ const SESSION_KEY = "rag.session_id";
  * would let anyone write into or delete someone else's session.
  */
 export async function getSessionId(): Promise<string> {
-  const stored = sessionStorage.getItem(SESSION_KEY);
+  const stored = readStoredId();
   if (stored) return stored;
 
   const response = await fetch(apiUrl("/session"), { method: "POST" });
@@ -80,16 +104,56 @@ export async function getSessionId(): Promise<string> {
   const { session_id: sessionId } = (await response.json()) as {
     session_id: string;
   };
-  sessionStorage.setItem(SESSION_KEY, sessionId);
+  writeStoredId(sessionId);
   return sessionId;
 }
 
 export function currentSessionId(): string | null {
-  try {
-    return sessionStorage.getItem(SESSION_KEY);
-  } catch {
-    return null;
+  return readStoredId();
+}
+
+export interface SessionDocument {
+  source_doc: string;
+  chunk_count: number;
+  pages: number | null;
+  extraction_methods: string[];
+}
+
+/** What the backend holds for this session, or [] if there is no session yet. */
+export async function listSessionDocuments(): Promise<SessionDocument[]> {
+  const sessionId = currentSessionId();
+  if (!sessionId) return [];
+
+  const response = await fetch(apiUrl(`/session/${sessionId}/documents`), {
+    cache: "no-store",
+  });
+
+  if (response.status === 400) {
+    // An id the server will not accept: it expired, or the store was reset.
+    // Forget it so the next upload starts a fresh session.
+    writeStoredId(null);
+    return [];
   }
+  if (!response.ok) {
+    throw new Error(`Could not list session documents: ${response.status}`);
+  }
+
+  return ((await response.json()) as { documents: SessionDocument[] }).documents;
+}
+
+/** Remove one uploaded document from this session. */
+export async function deleteSessionDocument(sourceDoc: string): Promise<number> {
+  const sessionId = currentSessionId();
+  if (!sessionId) return 0;
+
+  const response = await fetch(
+    apiUrl(`/session/${sessionId}/documents/${encodeURIComponent(sourceDoc)}`),
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(`Could not remove ${sourceDoc}: ${response.status}`);
+  }
+  return ((await response.json()) as { deleted_chunks: number }).deleted_chunks;
 }
 
 /** Delete this session's uploads and forget the id. */
@@ -100,10 +164,14 @@ export async function deleteSession(): Promise<boolean> {
   const response = await fetch(apiUrl(`/session/${sessionId}`), {
     method: "DELETE",
   });
-  sessionStorage.removeItem(SESSION_KEY);
+
+  // Only forget the id once the server has confirmed. Forgetting first would
+  // strand the uploads: the server still holds them and the client can no
+  // longer name them, so nothing but the TTL could ever remove them.
   if (!response.ok) {
     throw new Error(`Could not clear the session: ${response.status}`);
   }
+  writeStoredId(null);
   return ((await response.json()) as { deleted: boolean }).deleted;
 }
 

@@ -45,6 +45,16 @@ _REQUIRED_META_FIELDS = ("source_doc", "chunk_type", "extraction_method", "corpu
 
 
 @dataclass
+class DocumentSummary:
+    """One source document's footprint in the store."""
+
+    source_doc: str
+    chunk_count: int
+    pages: int | None
+    extraction_methods: list[str]
+
+
+@dataclass
 class SearchResult:
     """One hit from :meth:`VectorStore.search`.
 
@@ -198,6 +208,41 @@ class VectorStore:
             for cid, doc, meta in zip(
                 result["ids"], result["documents"], result["metadatas"]
             )
+        ]
+
+    def documents(self) -> list[DocumentSummary]:
+        """Every source document in the store, with its footprint.
+
+        Derived from chunk metadata rather than from a separate registry of
+        uploads. A registry would be a second source of truth that can drift
+        from the store it describes, and would need its own cleanup on delete;
+        metadata cannot disagree with the chunks it belongs to.
+
+        Only metadata is fetched, not the passage text, since none is needed to
+        count.
+        """
+        result = self._collection.get(include=["metadatas"])
+
+        counts: dict[str, int] = {}
+        pages: dict[str, set[int]] = {}
+        methods: dict[str, set[str]] = {}
+
+        for meta in result["metadatas"]:
+            name = meta["source_doc"]
+            counts[name] = counts.get(name, 0) + 1
+            methods.setdefault(name, set()).add(meta["extraction_method"])
+            # `page` is absent rather than null when unknown (see module docs).
+            if "page" in meta:
+                pages.setdefault(name, set()).add(meta["page"])
+
+        return [
+            DocumentSummary(
+                source_doc=name,
+                chunk_count=counts[name],
+                pages=len(pages[name]) if name in pages else None,
+                extraction_methods=sorted(methods[name]),
+            )
+            for name in sorted(counts)
         ]
 
     def count(self) -> int:

@@ -358,3 +358,143 @@ def test_delete_session_rejects_a_traversal_id():
     response = client.delete("/api/session/..%2F..%2Fchroma")
 
     assert response.status_code in (400, 404)
+
+
+# --------------------------------------------------------------------------- #
+# Listing and removing a session's documents (USERDOC-02)
+# --------------------------------------------------------------------------- #
+
+def _ingest(client, session_id, filename, text):
+    return client.post(
+        "/api/ingest",
+        files={"files": (filename, io.BytesIO(_pdf_bytes(text)), "application/pdf")},
+        data={"session_id": session_id},
+    )
+
+
+def test_documents_endpoint_lists_what_the_session_holds():
+    """A page reload loses the frontend's in-memory list; this recovers it."""
+    client = TestClient(create_app())
+    session_id = client.post("/api/session").json()["session_id"]
+
+    _ingest(client, session_id, "alpha.pdf", "alpha content with enough words here")
+    _ingest(client, session_id, "beta.pdf", "beta content with enough words here")
+
+    body = client.get(f"/api/session/{session_id}/documents").json()
+    names = [doc["source_doc"] for doc in body["documents"]]
+
+    assert names == ["alpha.pdf", "beta.pdf"]
+    assert all(doc["chunk_count"] > 0 for doc in body["documents"])
+    assert all("text" in doc["extraction_methods"] for doc in body["documents"])
+
+
+def test_documents_endpoint_is_empty_for_a_fresh_session():
+    client = TestClient(create_app())
+    session_id = client.post("/api/session").json()["session_id"]
+
+    assert client.get(f"/api/session/{session_id}/documents").json()["documents"] == []
+
+
+def test_documents_endpoint_rejects_a_guessable_id():
+    client = TestClient(create_app())
+    assert client.get("/api/session/demo1/documents").status_code == 400
+
+
+def test_one_session_cannot_see_anothers_documents():
+    client = TestClient(create_app())
+    mine = client.post("/api/session").json()["session_id"]
+    theirs = client.post("/api/session").json()["session_id"]
+
+    _ingest(client, mine, "mine.pdf", "my private uploaded content here")
+
+    assert client.get(f"/api/session/{theirs}/documents").json()["documents"] == []
+
+
+def test_delete_one_document_leaves_the_others():
+    client = TestClient(create_app())
+    session_id = client.post("/api/session").json()["session_id"]
+
+    _ingest(client, session_id, "alpha.pdf", "alpha content with enough words here")
+    _ingest(client, session_id, "beta.pdf", "beta content with enough words here")
+
+    response = client.delete(f"/api/session/{session_id}/documents/alpha.pdf")
+
+    assert response.status_code == 200
+    assert response.json()["deleted_chunks"] > 0
+
+    remaining = client.get(f"/api/session/{session_id}/documents").json()["documents"]
+    assert [doc["source_doc"] for doc in remaining] == ["beta.pdf"]
+
+
+def test_deleting_a_document_rebuilds_the_keyword_index():
+    """D-22: BM25 has no incremental delete, so a stale index would keep
+    returning a passage whose chunk is gone."""
+    client = TestClient(create_app())
+    session_id = client.post("/api/session").json()["session_id"]
+    _ingest(client, session_id, "alpha.pdf", "distinctive alpha content indexed here")
+
+    _, keyword_index = get_session_stores(session_id)
+    assert len(keyword_index) > 0
+
+    client.delete(f"/api/session/{session_id}/documents/alpha.pdf")
+
+    assert len(keyword_index) == 0
+
+
+def test_deleting_an_absent_document_reports_zero():
+    client = TestClient(create_app())
+    session_id = client.post("/api/session").json()["session_id"]
+
+    response = client.delete(f"/api/session/{session_id}/documents/never.pdf")
+
+    assert response.status_code == 200
+    assert response.json()["deleted_chunks"] == 0
+
+
+def test_document_delete_cannot_reach_another_session(tmp_path, monkeypatch):
+    """The scope is derived from the session id in the path, never trusted
+    from the document name."""
+    client = TestClient(create_app())
+    mine = client.post("/api/session").json()["session_id"]
+    theirs = client.post("/api/session").json()["session_id"]
+
+    _ingest(client, theirs, "theirs.pdf", "their content with enough words here")
+
+    response = client.delete(f"/api/session/{mine}/documents/theirs.pdf")
+
+    assert response.json()["deleted_chunks"] == 0
+    remaining = client.get(f"/api/session/{theirs}/documents").json()["documents"]
+    assert [doc["source_doc"] for doc in remaining] == ["theirs.pdf"]
+
+
+def test_document_summary_counts_distinct_pages():
+    from app.shared.schemas.chunk import Chunk
+    from tests.conftest import _stub_vector
+
+    store, _ = get_session_stores(new_session_id())
+    chunks = [
+        Chunk(chunk_id=f"c{i}", text=f"passage {i}", source_doc="multi.pdf",
+              page=page, chunk_type="text", extraction_method="text",
+              corpus_scope="persistent")
+        for i, page in enumerate([1, 1, 2])
+    ]
+    store.upsert([(c, _stub_vector(c.text)) for c in chunks])
+
+    summary = store.documents()[0]
+
+    assert summary.chunk_count == 3
+    assert summary.pages == 2
+
+
+def test_document_summary_reports_no_pages_for_pageless_sources():
+    """An image has no page number; the field is absent, not zero."""
+    from app.shared.schemas.chunk import Chunk
+    from tests.conftest import _stub_vector
+
+    store, _ = get_session_stores(new_session_id())
+    chunk = Chunk(chunk_id="i1", text="a chart", source_doc="chart.png",
+                  chunk_type="chart", extraction_method="vision",
+                  corpus_scope="persistent")
+    store.upsert([(chunk, _stub_vector(chunk.text))])
+
+    assert store.documents()[0].pages is None

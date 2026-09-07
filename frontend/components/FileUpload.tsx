@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import SessionDocuments from "@/components/SessionDocuments";
 import {
   ACCEPTED_EXTENSIONS,
   MAX_FILES_PER_REQUEST,
@@ -44,6 +45,8 @@ export default function FileUpload({ onIngested }: Props) {
   const [dragging, setDragging] = useState(false);
   const [target, setTarget] = useState<IngestTarget>("corpus");
   const [clearing, setClearing] = useState(false);
+  // Bumped after any mutation so the document list refetches.
+  const [refreshToken, setRefreshToken] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const busy = phase.kind === "uploading" || phase.kind === "processing";
@@ -115,6 +118,7 @@ export default function FileUpload({ onIngested }: Props) {
       setQueue([]);
       setRejected([]);
       setPhase({ kind: "done", result });
+      setRefreshToken((token) => token + 1);
       onIngested?.(result);
     } catch (error) {
       setPhase({
@@ -129,6 +133,7 @@ export default function FileUpload({ onIngested }: Props) {
     try {
       await deleteSession();
       setPhase({ kind: "idle" });
+      setRefreshToken((token) => token + 1);
     } catch (error) {
       setPhase({
         kind: "error",
@@ -263,6 +268,13 @@ export default function FileUpload({ onIngested }: Props) {
       )}
 
       <Status phase={phase} />
+
+      {target === "session" && (
+        <SessionDocuments
+          refreshToken={refreshToken}
+          onChanged={() => setPhase({ kind: "idle" })}
+        />
+      )}
     </div>
   );
 }
