@@ -25,3 +25,115 @@ export async function checkHealth(): Promise<HealthResponse> {
   }
   return (await response.json()) as HealthResponse;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Ingestion                                                                  */
+/* -------------------------------------------------------------------------- */
+
+// Mirrors the endpoint's limits, so a doomed batch fails instantly instead of
+// after a long upload.
+export const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".jpg", ".jpeg", ".png"];
+export const MAX_FILES_PER_REQUEST = 60;
+export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
+export interface IngestFailure {
+  filename: string;
+  reason: string;
+}
+
+export interface IngestResponse {
+  chunk_count: number;
+  indexed: {
+    total: number;
+    by_extraction_method: Record<string, number>;
+    failed: number;
+    failure_reason: string | null;
+    vector_store_total: number;
+    keyword_index_total: number;
+  };
+  succeeded: string[];
+  failed: IngestFailure[];
+}
+
+export function fileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot === -1 ? "" : name.slice(dot).toLowerCase();
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Why this file cannot be sent, or null if it can. */
+export function rejectionReason(file: File): string | null {
+  if (!ACCEPTED_EXTENSIONS.includes(fileExtension(file.name))) {
+    return `unsupported type (${ACCEPTED_EXTENSIONS.join(", ")})`;
+  }
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return `too large (${formatBytes(file.size)}, max ${formatBytes(MAX_FILE_SIZE_BYTES)})`;
+  }
+  if (file.size === 0) {
+    return "empty file";
+  }
+  return null;
+}
+
+/**
+ * Upload files to the ingestion endpoint.
+ *
+ * XMLHttpRequest rather than fetch, because fetch cannot report upload
+ * progress. The upload is quick; extraction and embedding then run for minutes
+ * with nothing on the wire, and without that distinction the page looks frozen.
+ */
+export function ingestFiles(
+  files: File[],
+  onUploadProgress?: (fraction: number) => void,
+): Promise<IngestResponse> {
+  const body = new FormData();
+  for (const file of files) {
+    body.append("files", file, file.name);
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", apiUrl("/ingest"));
+
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && onUploadProgress) {
+        onUploadProgress(event.loaded / event.total);
+      }
+    });
+
+    request.addEventListener("load", () => {
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(request.responseText);
+      } catch {
+        // Falls through to the status-based message below.
+      }
+
+      if (request.status >= 200 && request.status < 300) {
+        resolve(payload as IngestResponse);
+        return;
+      }
+
+      // FastAPI puts the readable message in `detail`.
+      const detail =
+        payload && typeof payload === "object" && "detail" in payload
+          ? String((payload as { detail: unknown }).detail)
+          : `${request.status} ${request.statusText || "request failed"}`;
+      reject(new Error(detail));
+    });
+
+    request.addEventListener("error", () => {
+      reject(new Error(`Cannot reach the backend at ${API_BASE_URL}`));
+    });
+    request.addEventListener("abort", () => {
+      reject(new Error("Upload cancelled"));
+    });
+
+    request.send(body);
+  });
+}
