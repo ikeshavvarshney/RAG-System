@@ -1,6 +1,14 @@
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from app.ingestion.pipeline import FileError, ingest_files
+from app.shared.session_store import (
+    InvalidSessionId,
+    drop_session,
+    get_session_stores,
+    new_session_id,
+    scope_for,
+    validate_issued_session_id,
+)
 
 router = APIRouter()
 
@@ -18,7 +26,15 @@ MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 @router.post("/ingest")
-async def ingest(files: list[UploadFile]):
+async def ingest(files: list[UploadFile], session_id: str | None = Form(default=None)):
+    """Ingest documents into the corpus, or into one session's own store.
+
+    Without ``session_id`` the documents go to the persistent corpus. With one,
+    they go to that session's separate store and are tagged
+    ``corpus_scope="session:{id}"``. The default is the corpus because loading
+    the research corpus is the unattended path; a user upload is the one that
+    knows which session it belongs to and says so.
+    """
     if len(files) > MAX_FILES_PER_REQUEST:
         raise HTTPException(
             status_code=413,
@@ -51,7 +67,22 @@ async def ingest(files: list[UploadFile]):
 
         file_payloads.append((upload.filename, content))
 
-    result = ingest_files(file_payloads, corpus_scope="persistent")
+    if session_id is None:
+        result = ingest_files(file_payloads, corpus_scope="persistent")
+    else:
+        try:
+            validate_issued_session_id(session_id)
+            vector_store, keyword_index = get_session_stores(session_id)
+        except InvalidSessionId as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        result = ingest_files(
+            file_payloads,
+            corpus_scope=scope_for(session_id),
+            vector_store=vector_store,
+            keyword_index=keyword_index,
+        )
+
     failures = oversized + result.failed
 
     index = result.index
@@ -73,4 +104,34 @@ async def ingest(files: list[UploadFile]):
         "failed": [
             {"filename": f.filename, "reason": f.reason} for f in failures
         ],
+        "corpus_scope": "persistent" if session_id is None else scope_for(session_id),
     }
+
+
+@router.post("/session")
+async def create_session():
+    """Issue a session id for scoping uploads.
+
+    The id is generated here rather than accepted from the client because it is
+    the only thing protecting a session's uploads: there is no authentication,
+    so a guessable id would let anyone write into or delete someone else's
+    session.
+    """
+    return {"session_id": new_session_id()}
+
+
+@router.delete("/session/{session_id}")
+async def delete_session(session_id: str):
+    """Drop a session's uploads entirely (USERDOC-02, whole-session form).
+
+    Removes the session's store directory, so nothing survives in either index.
+    Deleting a session that was never created is not an error: the caller's
+    intent, that the session hold nothing, is satisfied either way.
+    """
+    try:
+        validate_issued_session_id(session_id)
+        removed = drop_session(session_id)
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"session_id": session_id, "deleted": removed}

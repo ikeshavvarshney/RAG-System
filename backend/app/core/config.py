@@ -21,7 +21,13 @@ class Settings(BaseSettings):
 
 
 #---Storage ----
+    # The persistent corpus. Session uploads never land here.
     CHROMA_PATH: str = "./data/chroma"
+    # One Chroma directory per session, so a session's uploads are dropped by
+    # removing a directory and cannot contaminate the corpus that RQ1/RQ2 are
+    # measured against.
+    SESSION_STORE_ROOT: str = "./data/sessions"
+    SESSION_TTL_HOURS: float = 24.0
 
     #---Vision & Embedding (Week 3) ---
     EMBEDDING_MODEL: str = "gemini-embedding-001"

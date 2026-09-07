@@ -72,6 +72,22 @@ class VectorStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+    def close(self) -> None:
+        """Release the underlying Chroma client and its SQLite handle.
+
+        Needed before deleting a store's directory: Chroma caches a system per
+        path, so dropping the Python reference leaves the database file open
+        and, on Windows, the directory undeletable.
+        """
+        try:
+            self._client.close()
+        except Exception:  # noqa: BLE001 - closing must not raise on teardown
+            pass
+        try:
+            self._client.clear_system_cache()
+        except Exception:  # noqa: BLE001
+            pass
+
     # ------------------------------------------------------------------ #
     # Writes
     # ------------------------------------------------------------------ #

@@ -221,7 +221,13 @@ The response reports per-file success and failure:
 }
 ```
 
-**Expect a full-corpus ingest to take hours, not minutes.** Every figure and scanned page costs a vision call of roughly 15 to 30 seconds, and embedding is paced to stay inside the free-tier ceiling. A measured five-document batch containing one twelve-page scan took 270 seconds. Use a larger key pool to reduce rate-limit stalls; it does not reduce the per-call latency.
+**Expect a full-corpus ingest to take roughly half an hour.** Measured against the 50-document corpus: 264 PDF pages, of which only 30 need vision (the two scanned CIA PDFs account for all of them), plus the 12 standalone images. That is 42 vision calls at 15 to 30 seconds each, and about 1,340 passages to embed at the 0.9 second pacing that keeps the embedding API inside its free-tier ceiling. Vision is therefore the smaller cost; most of the time is embedding.
+
+A larger key pool reduces rate-limit stalls but not per-call latency, so it helps only if the run is actually being throttled.
+
+Two properties make a long run safe to interrupt. Vision responses are cached by image content, so a re-run does not pay for transcription twice. Indexing is idempotent, keyed on passage identity, and each embedding batch is written as soon as it succeeds, so re-running an interrupted ingest tops up the index rather than duplicating it.
+
+One property makes it worth batching anyway: `ingest_files` extracts every file before it indexes anything. If a 50-file request dies during extraction, nothing from that request is indexed, and the extraction work (though not the API cost) is repeated.
 
 Limits enforced by the endpoint: 60 files per request, 50 MB per file, and `.pdf`, `.docx`, `.jpg`, `.jpeg`, `.png` only. Type is decided by sniffing magic bytes, not by the extension or the declared Content-Type. An unsupported or oversized file is reported on its own and the rest of the batch still ingests.
 

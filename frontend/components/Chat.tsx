@@ -38,8 +38,10 @@ export default function Chat() {
   /** Record the ingest in the transcript so it survives hiding the panel. */
   function handleIngested(result: IngestResponse) {
     const names = result.succeeded.join(", ");
+    const where =
+      result.corpus_scope === "persistent" ? "the corpus" : "this session";
     const lines = [
-      `Indexed ${result.indexed.total} passages from ${result.succeeded.length} document(s): ${names}.`,
+      `Indexed ${result.indexed.total} passages from ${result.succeeded.length} document(s) into ${where}: ${names}.`,
     ];
     if (result.failed.length > 0) {
       lines.push(

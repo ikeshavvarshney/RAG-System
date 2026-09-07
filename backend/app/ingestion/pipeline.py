@@ -45,7 +45,9 @@ def ingest_files(
 
     After all chunks are produced they are embedded and written to the vector
     store + keyword index (see :func:`app.ingestion.indexer.index_chunks`);
-    ``vector_store`` / ``keyword_index`` default to the process singletons.
+    ``vector_store`` / ``keyword_index`` default to the process singletons,
+    which are the corpus store. A session upload passes that session's stores
+    explicitly, so its passages never enter the corpus.
     """
     result = IngestResult()
 
