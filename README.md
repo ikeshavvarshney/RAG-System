@@ -32,6 +32,7 @@ Both are evaluated against a hand-constructed question-answer set using the RAGA
 | [05. Research Methodology](docs/05-research-methodology.md) | Experimental design, evaluation metrics, both ablation studies |
 | [06. Implementation Plan](docs/06-implementation-plan.md) | Eight-week schedule, work distribution, risk assessment |
 | [07. Design Decisions](docs/07-design-decisions.md) | Significant technical decisions with rationale |
+| [08. Running the System](docs/08-running-the-system.md) | Setup, running services, tests, fetching the corpus, ingestion |
 
 ---
 
