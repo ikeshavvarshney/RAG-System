@@ -66,6 +66,10 @@ def embed_query(text: str) -> list[float]:
     return _embed_texts([text], _model_id())[0]
 
 
+def embed_queries(texts: list[str]) -> list[list[float]]:
+    return _embed_texts(texts, _model_id())
+
+
 # --------------------------------------------------------------------------- #
 # Internals
 # --------------------------------------------------------------------------- #
