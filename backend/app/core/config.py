@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     EMBEDDING_CACHE_DIR: str = "./data/cache/embeddings"
     VISION_CACHE_DIR: str = "./data/cache/vision"
 
+
+    #--- Query pipeline (Week 4) ---
+    QUERY_MODEL: str = "gemini-3.6-flash"
+    QUERY_MAX_CHARS: int = 2000
+    # Total queries sent to dense search, the original included.
+    EXPANSION_COUNT: int = Field(default=4, ge=3, le=5)
+    RETRIEVAL_TOP_K: int = 20
 
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)

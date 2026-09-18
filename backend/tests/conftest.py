@@ -55,3 +55,28 @@ def isolate_index_stores(tmp_path, monkeypatch):
         ]
 
     monkeypatch.setattr(indexer, "embed_chunks", _stub_embed_chunks)
+
+class FakeLLM:
+    """Scripted stand-in for ``llm.generate``, keyed by stage name."""
+
+    def __init__(self):
+        self.replies: dict[str, str | Exception] = {}
+        self.calls: list[tuple[str, str]] = []
+
+    async def __call__(self, stage: str, prompt: str) -> str:
+        self.calls.append((stage, prompt))
+        reply = self.replies.get(stage)
+        if reply is None:
+            raise RuntimeError(f"unscripted LLM call: {stage}")
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+@pytest.fixture
+def fake_llm(monkeypatch):
+    from app.query import llm
+
+    fake = FakeLLM()
+    monkeypatch.setattr(llm, "generate", fake)
+    return fake
