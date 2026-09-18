@@ -107,10 +107,18 @@ class GeminiClient:
         assert last_exc is not None  # loop ran at least once
         raise last_exc
 
-    def generate(self, stage: str, model: str, prompt: str) -> str:
+    def generate(
+        self,
+        stage: str,
+        model: str,
+        prompt: str,
+        config: types.GenerateContentConfig | None = None,
+    ) -> str:
         def _operation(api_key: str) -> str:
             client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(model=model, contents=prompt)
+            response = client.models.generate_content(
+                model=model, contents=prompt, config=config
+            )
 
             usage = response.usage_metadata
             self.tracker.record(

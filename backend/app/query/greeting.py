@@ -3,6 +3,7 @@ import string
 from app.query import llm
 
 _MAX_CLASSIFIED_WORDS = 4
+_MAX_OUTPUT_TOKENS = 50
 
 _PHRASES = {
     "greeting": {
@@ -44,7 +45,9 @@ def _match_phrase(text: str) -> str | None:
 
 
 async def _classify(text: str) -> str | None:
-    result = await llm.generate_json("query_greeting", _CLASSIFIER_PROMPT.format(message=text))
+    result = await llm.generate_json(
+        "query_greeting", _CLASSIFIER_PROMPT.format(message=text), _MAX_OUTPUT_TOKENS
+    )
     kind = result.get("kind") if isinstance(result, dict) else None
     return kind if kind in _REPLIES else None
 

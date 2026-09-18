@@ -62,9 +62,11 @@ class FakeLLM:
     def __init__(self):
         self.replies: dict[str, str | Exception] = {}
         self.calls: list[tuple[str, str]] = []
+        self.token_caps: list[int] = []
 
-    async def __call__(self, stage: str, prompt: str) -> str:
+    async def __call__(self, stage: str, prompt: str, max_output_tokens: int) -> str:
         self.calls.append((stage, prompt))
+        self.token_caps.append(max_output_tokens)
         reply = self.replies.get(stage)
         if reply is None:
             raise RuntimeError(f"unscripted LLM call: {stage}")

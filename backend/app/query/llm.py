@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any
 
+from google.genai import types
+
 from app.core.config import settings
 from app.core.gemini_client import GeminiClient
 
@@ -15,13 +17,23 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _JSON_SPAN = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
 
 
-async def generate(stage: str, prompt: str) -> str:
-    return await asyncio.to_thread(_client.generate, stage, settings.QUERY_MODEL, prompt)
+def _config(max_output_tokens: int) -> types.GenerateContentConfig:
+    # Thinking tokens made these short calls 3-5x slower and are not needed for them.
+    return types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        max_output_tokens=max_output_tokens,
+    )
 
 
-async def generate_json(stage: str, prompt: str) -> Any | None:
+async def generate(stage: str, prompt: str, max_output_tokens: int) -> str:
+    return await asyncio.to_thread(
+        _client.generate, stage, settings.QUERY_MODEL, prompt, _config(max_output_tokens)
+    )
+
+
+async def generate_json(stage: str, prompt: str, max_output_tokens: int) -> Any | None:
     try:
-        text = await generate(stage, prompt)
+        text = await generate(stage, prompt, max_output_tokens)
     except Exception:  # noqa: BLE001 - callers decide the fallback
         logger.warning("%s: LLM call failed", stage, exc_info=True)
         return None

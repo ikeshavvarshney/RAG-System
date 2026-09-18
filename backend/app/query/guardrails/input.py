@@ -7,6 +7,8 @@ from app.query import llm
 
 logger = logging.getLogger(__name__)
 
+_MAX_OUTPUT_TOKENS = 100
+
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 _INJECTION_PATTERNS = tuple(
@@ -63,7 +65,7 @@ async def check_input(raw: str) -> GuardrailVerdict:
         return verdict
 
     result = await llm.generate_json(
-        "query_guardrail", _CLASSIFIER_PROMPT.format(question=verdict.sanitized)
+        "query_guardrail", _CLASSIFIER_PROMPT.format(question=verdict.sanitized), _MAX_OUTPUT_TOKENS
     )
     if isinstance(result, dict) and result.get("safe") is False:
         reason = result.get("reason")
