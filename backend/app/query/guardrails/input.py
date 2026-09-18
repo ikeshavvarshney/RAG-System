@@ -59,17 +59,13 @@ def check_deterministic(raw: str) -> GuardrailVerdict:
     return GuardrailVerdict(allowed=True, sanitized=sanitized)
 
 
-async def check_input(raw: str) -> GuardrailVerdict:
-    verdict = check_deterministic(raw)
-    if not verdict.allowed:
-        return verdict
-
+async def check_llm(sanitized: str) -> GuardrailVerdict:
     result = await llm.generate_json(
-        "query_guardrail", _CLASSIFIER_PROMPT.format(question=verdict.sanitized), _MAX_OUTPUT_TOKENS
+        "query_guardrail", _CLASSIFIER_PROMPT.format(question=sanitized), _MAX_OUTPUT_TOKENS
     )
     if isinstance(result, dict) and result.get("safe") is False:
         reason = result.get("reason")
-        return _reject(verdict.sanitized, reason if isinstance(reason, str) and reason else "Question was rejected by the safety check.")
+        return _reject(sanitized, reason if isinstance(reason, str) and reason else "Question was rejected by the safety check.")
     if not isinstance(result, dict) or not isinstance(result.get("safe"), bool):
         logger.warning("guardrail classifier gave no usable verdict; failing open")
-    return verdict
+    return GuardrailVerdict(allowed=True, sanitized=sanitized)

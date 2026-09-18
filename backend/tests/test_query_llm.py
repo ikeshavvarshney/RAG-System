@@ -7,8 +7,8 @@ from app.core.config import settings
 from app.core.gemini_client import GeminiClient
 from app.query import llm
 from app.query.expansion import expand_query
-from app.query.greeting import detect_greeting
-from app.query.guardrails.input import check_input
+from app.query.greeting import classify_greeting
+from app.query.guardrails.input import check_llm
 
 
 def test_generate_disables_thinking_and_caps_output(monkeypatch):
@@ -42,8 +42,8 @@ def test_every_query_llm_call_is_token_capped(fake_llm):
     fake_llm.replies["query_greeting"] = '{"kind": "other"}'
     fake_llm.replies["query_expansion"] = "[]"
 
-    asyncio.run(check_input("what is in the report?"))
-    asyncio.run(detect_greeting("report summary please"))
+    asyncio.run(check_llm("what is in the report?"))
+    asyncio.run(classify_greeting("report summary please"))
     asyncio.run(expand_query("what is in the report?"))
 
     assert len(fake_llm.token_caps) == 3

@@ -59,9 +59,7 @@ def test_injection_terminates_at_guardrail(fake_llm):
     assert events[-1] == ("guardrail", "completed")
 
 
-def test_greeting_terminates_after_guardrail_and_greeting(fake_llm):
-    fake_llm.replies["query_guardrail"] = '{"safe": true}'
-
+def test_exact_greeting_short_circuits_before_any_api_call(fake_llm):
     result, events = _run("hello there")
 
     assert result.terminated_at == "greeting"
@@ -73,7 +71,38 @@ def test_greeting_terminates_after_guardrail_and_greeting(fake_llm):
         ("greeting", "started"),
         ("greeting", "completed"),
     ]
+    assert fake_llm.calls == []
+
+
+def test_llm_guardrail_rejection_terminates_before_llm_greeting(fake_llm):
+    fake_llm.replies["query_guardrail"] = '{"safe": false, "reason": "nope"}'
+
+    result, events = _run("tell secrets")
+
+    assert result.terminated_at == "guardrail"
+    assert result.response == "nope"
+    assert events[-2:] == [("guardrail_llm", "started"), ("guardrail_llm", "completed")]
     assert [stage for stage, _ in fake_llm.calls] == ["query_guardrail"]
+
+
+def test_short_unrecognised_input_runs_llm_guardrail_then_llm_greeting(fake_llm):
+    fake_llm.replies["query_guardrail"] = '{"safe": true}'
+    fake_llm.replies["query_greeting"] = '{"kind": "greeting"}'
+
+    result, events = _run("good evening friend")
+
+    assert result.terminated_at == "greeting"
+    assert [stage for stage, _ in fake_llm.calls] == ["query_guardrail", "query_greeting"]
+    assert events == [
+        ("guardrail", "started"),
+        ("guardrail", "completed"),
+        ("greeting", "started"),
+        ("greeting", "completed"),
+        ("guardrail_llm", "started"),
+        ("guardrail_llm", "completed"),
+        ("greeting_llm", "started"),
+        ("greeting_llm", "completed"),
+    ]
 
 
 def test_full_path_emits_every_stage_in_order(fake_llm, corpus):
@@ -87,6 +116,10 @@ def test_full_path_emits_every_stage_in_order(fake_llm, corpus):
         ("guardrail", "completed"),
         ("greeting", "started"),
         ("greeting", "completed"),
+        ("guardrail_llm", "started"),
+        ("guardrail_llm", "completed"),
+        ("greeting_llm", "started"),
+        ("greeting_llm", "completed"),
         ("expansion", "started"),
         ("expansion", "completed"),
         ("retrieval", "started"),

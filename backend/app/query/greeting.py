@@ -39,21 +39,17 @@ def _normalize(text: str) -> str:
     return " ".join(text.lower().translate(_PUNCTUATION).split())
 
 
-def _match_phrase(text: str) -> str | None:
+def match_greeting(text: str) -> str | None:
     normalized = _normalize(text)
-    return next((kind for kind, phrases in _PHRASES.items() if normalized in phrases), None)
+    kind = next((kind for kind, phrases in _PHRASES.items() if normalized in phrases), None)
+    return _REPLIES.get(kind) if kind else None
 
 
-async def _classify(text: str) -> str | None:
+async def classify_greeting(text: str) -> str | None:
+    if len(text.split()) > _MAX_CLASSIFIED_WORDS:
+        return None
     result = await llm.generate_json(
         "query_greeting", _CLASSIFIER_PROMPT.format(message=text), _MAX_OUTPUT_TOKENS
     )
     kind = result.get("kind") if isinstance(result, dict) else None
-    return kind if kind in _REPLIES else None
-
-
-async def detect_greeting(text: str) -> str | None:
-    kind = _match_phrase(text)
-    if kind is None and len(text.split()) <= _MAX_CLASSIFIED_WORDS:
-        kind = await _classify(text)
-    return _REPLIES.get(kind) if kind else None
+    return _REPLIES.get(kind) if isinstance(kind, str) else None

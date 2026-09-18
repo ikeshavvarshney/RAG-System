@@ -33,10 +33,9 @@ def test_empty_question_returns_guardrail_result(client, fake_llm):
 
 
 def test_greeting_short_circuits(client, fake_llm):
-    fake_llm.replies["query_guardrail"] = '{"safe": true}'
-
     body = client.post("/api/query", json={"question": "hi"}).json()
 
+    assert fake_llm.calls == []
     assert body["terminated_at"] == "greeting"
     assert body["retrieval"] == {"vector_hits": [], "keyword_hits": []}
 

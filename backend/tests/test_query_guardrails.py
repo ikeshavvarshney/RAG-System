@@ -4,11 +4,12 @@ import logging
 import pytest
 
 from app.core.config import settings
-from app.query.guardrails.input import GuardrailVerdict, check_input
+from app.query.guardrails.input import GuardrailVerdict, check_deterministic, check_llm
 
 
 def _check(text: str) -> GuardrailVerdict:
-    return asyncio.run(check_input(text))
+    verdict = check_deterministic(text)
+    return verdict if not verdict.allowed else asyncio.run(check_llm(verdict.sanitized))
 
 
 @pytest.mark.parametrize("text", ["", "   ", "\n\t ", "\x00\x07\x1b"])

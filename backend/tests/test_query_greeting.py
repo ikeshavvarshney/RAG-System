@@ -2,11 +2,11 @@ import asyncio
 
 import pytest
 
-from app.query.greeting import detect_greeting
+from app.query.greeting import classify_greeting, match_greeting
 
 
 def _detect(text: str) -> str | None:
-    return asyncio.run(detect_greeting(text))
+    return match_greeting(text) or asyncio.run(classify_greeting(text))
 
 
 @pytest.mark.parametrize("text", ["hi", "hello there", "thanks!", "Hello!", "  Thank you. ", "bye"])
@@ -35,7 +35,7 @@ def test_llm_saying_other_passes_through(fake_llm):
 
 @pytest.mark.parametrize(
     "reply",
-    [RuntimeError("boom"), "gibberish", '{"kind": "poem"}', '{"kind": 3}', "[]", '{"other": 1}'],
+    [RuntimeError("boom"), "gibberish", '{"kind": "poem"}', '{"kind": 3}', '{"kind": ["greeting"]}', "[]", '{"other": 1}'],
 )
 def test_unsure_llm_passes_through(fake_llm, reply):
     fake_llm.replies["query_greeting"] = reply
