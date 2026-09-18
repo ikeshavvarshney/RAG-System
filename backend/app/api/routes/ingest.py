@@ -2,6 +2,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from app.ingestion.pipeline import FileError, ingest_files
 from app.shared.session_store import (
+    PERSISTENT_SCOPE,
     InvalidSessionId,
     drop_session,
     get_session_stores,
@@ -68,7 +69,7 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
         file_payloads.append((upload.filename, content))
 
     if session_id is None:
-        result = ingest_files(file_payloads, corpus_scope="persistent")
+        result = ingest_files(file_payloads, corpus_scope=PERSISTENT_SCOPE)
     else:
         try:
             validate_issued_session_id(session_id)
@@ -104,7 +105,7 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
         "failed": [
             {"filename": f.filename, "reason": f.reason} for f in failures
         ],
-        "corpus_scope": "persistent" if session_id is None else scope_for(session_id),
+        "corpus_scope": PERSISTENT_SCOPE if session_id is None else scope_for(session_id),
     }
 
 

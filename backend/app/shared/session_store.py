@@ -79,6 +79,9 @@ def validate_issued_session_id(session_id: str) -> str:
     return session_id
 
 
+PERSISTENT_SCOPE = "persistent"
+
+
 def scope_for(session_id: str) -> str:
     """The ``corpus_scope`` value carried by this session's chunks."""
     return f"session:{validate_session_id(session_id)}"
