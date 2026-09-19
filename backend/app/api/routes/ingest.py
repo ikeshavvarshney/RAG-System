@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from app.ingestion.pipeline import FileError, ingest_files
+from app.query import cache
 from app.shared.session_store import (
     PERSISTENT_SCOPE,
     InvalidSessionId,
@@ -170,10 +171,14 @@ async def delete_session_document(session_id: str, source_doc: str):
         # D-22: BM25 is rebuilt in full after any mutation, never patched.
         keyword_index.rebuild()
 
+    # Cached answers citing this document would otherwise keep quoting it.
+    invalidated = cache.invalidate_by_document(source_doc, scope_for(session_id))
+
     return {
         "session_id": session_id,
         "source_doc": source_doc,
         "deleted_chunks": len(removed),
+        "invalidated_cache_entries": invalidated,
     }
 
 
@@ -191,4 +196,10 @@ async def delete_session(session_id: str):
     except InvalidSessionId as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"session_id": session_id, "deleted": removed}
+    invalidated = cache.invalidate_scope(scope_for(session_id))
+
+    return {
+        "session_id": session_id,
+        "deleted": removed,
+        "invalidated_cache_entries": invalidated,
+    }
