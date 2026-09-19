@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -60,7 +62,7 @@ class FakeLLM:
     """Scripted stand-in for ``llm.generate``, keyed by stage name."""
 
     def __init__(self):
-        self.replies: dict[str, str | Exception] = {}
+        self.replies: dict[str, str | Exception | Callable[[str], str]] = {}
         self.calls: list[tuple[str, str]] = []
         self.token_caps: list[int] = []
 
@@ -72,7 +74,7 @@ class FakeLLM:
             raise RuntimeError(f"unscripted LLM call: {stage}")
         if isinstance(reply, Exception):
             raise reply
-        return reply
+        return reply(prompt) if callable(reply) else reply
 
 
 @pytest.fixture
@@ -87,3 +89,10 @@ def fake_llm(monkeypatch):
 @pytest.fixture(autouse=True)
 def no_startup_warm_up(monkeypatch):
     monkeypatch.setattr("app.main.warm_up_clients", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def fresh_history(monkeypatch):
+    from app.query import history
+
+    monkeypatch.setattr(history, "_store", history.HistoryStore())

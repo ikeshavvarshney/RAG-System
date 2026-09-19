@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_ROOT = _REPO_ROOT / "backend"
-_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR")
+_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "CACHE_PATH")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # Total queries sent to dense search, the original included.
     EXPANSION_COUNT: int = Field(default=4, ge=3, le=5)
     RETRIEVAL_TOP_K: int = 20
+    HISTORY_MAX_TURNS: int = 3
+    HISTORY_MAX_SESSIONS: int = 1000
+    HISTORY_IDLE_HOURS: float = 24.0
+    CACHE_PATH: str = "./data/answer_cache"
+    # A hit bypasses the whole pipeline, so err high: a miss only costs a retrieval.
+    CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.94, ge=0.0, le=1.0)
 
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)
