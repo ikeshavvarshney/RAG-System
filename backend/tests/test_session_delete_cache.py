@@ -57,3 +57,4 @@ def test_deleting_a_session_drops_every_cache_entry_in_its_scope():
 
     assert response.json()["invalidated_cache_entries"] == 2
     assert cache.get_answer_cache().count() == 1
+

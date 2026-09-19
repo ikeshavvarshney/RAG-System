@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
+from app.core.config import settings
 from app.ingestion.pipeline import FileError, ingest_files
 from app.query import cache
 from app.shared.session_store import (
@@ -77,6 +78,18 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
             vector_store, keyword_index = get_session_stores(session_id)
         except InvalidSessionId as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        held = {doc.source_doc for doc in vector_store.documents()}
+        incoming = {name for name, _ in file_payloads}
+        limit = settings.SESSION_MAX_DOCUMENTS
+        if len(held | incoming) > limit:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Session limit is {limit} documents: {len(held)} already "
+                    f"uploaded, {len(incoming - held)} new in this request"
+                ),
+            )
 
         result = ingest_files(
             file_payloads,

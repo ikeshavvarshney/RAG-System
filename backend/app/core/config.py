@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # measured against.
     SESSION_STORE_ROOT: str = "./data/sessions"
     SESSION_TTL_HOURS: float = 24.0
+    SESSION_MAX_DOCUMENTS: int = 5
 
     #---Vision & Embedding (Week 3) ---
     EMBEDDING_MODEL: str = "gemini-embedding-001"
