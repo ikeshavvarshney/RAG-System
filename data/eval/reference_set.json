@@ -1,0 +1,319 @@
+{
+  "version": "0.1-draft",
+  "description": "Hand-drafted reference question-answer set (docs/05-research-methodology.md, 'Reference Question-Answer Set'). Answers were read from the corpus files directly, never from system output.",
+  "review_status": "Draft. Every entry needs a second read against the source before evaluation. Entries with approximate=true read values off an unlabelled chart and are graded on the named category or year, not the exact figure.",
+  "categories": {
+    "single_hop": "Answerable from one passage",
+    "multi_hop": "Needs several passages or documents, or arithmetic across them",
+    "table_chart": "Answer lives in a table or chart; visual_dependent marks whether the answer is absent from the surrounding prose",
+    "keyword": "Exact identifier or rare term",
+    "out_of_corpus": "Not in the corpus; expected behaviour is web fallback or an honest non-answer"
+  },
+  "questions": [
+    {
+      "id": "Q01",
+      "category": "single_hop",
+      "question": "What total budget did NASA request for fiscal year 2023?",
+      "reference_answer": "$26.0 billion, a 4.7% increase over the FY 2022 President's request and an 8.0% increase over FY 2022 enacted.",
+      "sources": [{"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q02",
+      "category": "single_hop",
+      "question": "How much does the FY 2023 NASA budget request include for Mars Sample Return?",
+      "reference_answer": "$822 million.",
+      "sources": [{"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q03",
+      "category": "single_hop",
+      "question": "At what altitude will the Landsat Next satellites orbit?",
+      "reference_answer": "653 kilometers (406 miles), in a Sun-synchronous orbit.",
+      "sources": [{"doc": "usgs-landsat-next-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q04",
+      "category": "single_hop",
+      "question": "How many satellites make up Landsat Next and when is it targeted to launch?",
+      "reference_answer": "A constellation of three identical satellites (the 'triplets'), targeted for launch in the early 2030s.",
+      "sources": [{"doc": "usgs-landsat-next-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q05",
+      "category": "single_hop",
+      "question": "What revisit cycle will the Landsat Next constellation achieve for any location on Earth's land and coastal regions?",
+      "reference_answer": "A 6-day revisit cycle.",
+      "sources": [{"doc": "usgs-landsat-next-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q06",
+      "category": "single_hop",
+      "question": "How large is U.S. firms' direct exposure to Evergrande, and who reported it?",
+      "reference_answer": "About $348.4 million, according to Bloomberg.",
+      "sources": [{"doc": "crs-evergrande-china-debt-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q07",
+      "category": "single_hop",
+      "question": "Where is Evergrande based and when was it founded?",
+      "reference_answer": "It is based in Shenzhen and was founded in 1996.",
+      "sources": [{"doc": "crs-evergrande-china-debt-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q08",
+      "category": "single_hop",
+      "question": "According to the IMF, roughly what share of China's GDP does the property market account for?",
+      "reference_answer": "About 30%, a higher share than in most countries.",
+      "sources": [{"doc": "crs-evergrande-china-debt-2024.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q09",
+      "category": "single_hop",
+      "question": "How large was Chinese local government debt in 2022?",
+      "reference_answer": "About $12.6 trillion, or 76% of GDP, according to the IMF.",
+      "sources": [{"doc": "crs-evergrande-china-debt-2024.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q10",
+      "category": "single_hop",
+      "question": "What share of U.S. adults with low English literacy were born outside the United States, compared with their share of all adults?",
+      "reference_answer": "34 percent of adults with low literacy skills were born outside the U.S., compared with 15 percent of the total population.",
+      "sources": [{"doc": "nces-adult-literacy-2019.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q11",
+      "category": "single_hop",
+      "question": "What age range of adults does the PIAAC study cover?",
+      "reference_answer": "Working-age adults, ages 16-65.",
+      "sources": [{"doc": "nces-adult-literacy-2019.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q12",
+      "category": "single_hop",
+      "question": "Which STEM occupation group had the largest employment in the BLS overview, and how many people?",
+      "reference_answer": "Group 4-A (Health research, development, design, or practitioner occupations), with 4,777,850.",
+      "sources": [{"doc": "bls-stem-employment-wages-undated.pdf", "pages": [3]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q13",
+      "category": "single_hop",
+      "question": "What is the National Initiative for Cybersecurity Education (NICE) and what does its Workforce Framework provide?",
+      "reference_answer": "NICE, led by NIST, is a partnership among government, academia and the private sector focused on cybersecurity education, training and workforce development. Its Workforce Framework establishes a taxonomy and common lexicon describing cybersecurity work and workers.",
+      "sources": [{"doc": "nist-cybersecurity-privacy-vitals-2022.pdf", "pages": [4]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q14",
+      "category": "single_hop",
+      "question": "How much of the excess CO2 emitted is absorbed by the terrestrial biosphere and the ocean?",
+      "reference_answer": "About half of the excess CO2 emission is absorbed by the terrestrial biosphere and the ocean, where it leads to ocean acidification.",
+      "sources": [{"doc": "noaa-greenhouse-gases-climate-factsheet-undated.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q15",
+      "category": "single_hop",
+      "question": "Over what period is the federal budget deficit measured?",
+      "reference_answer": "Over the fiscal year, which runs from October 1 through September 30.",
+      "sources": [{"doc": "crs-deficits-debt-limit-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q16",
+      "category": "multi_hop",
+      "question": "How much more does NASA's FY 2023 request give Planetary Science than Astrophysics?",
+      "reference_answer": "$1.604 billion more ($3.160 billion for Planetary Science minus $1.556 billion for Astrophysics).",
+      "sources": [{"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q17",
+      "category": "multi_hop",
+      "question": "What share of NASA's FY 2023 Science request goes to Earth Science and Planetary Science combined?",
+      "reference_answer": "About 70%: $2.412 billion plus $3.160 billion is $5.572 billion, out of $7.988 billion for Science.",
+      "sources": [{"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q18",
+      "category": "multi_hop",
+      "question": "By how many percentage points of GDP is the federal deficit projected to grow between FY2024 and FY2054, and how does publicly held debt change over the same period?",
+      "reference_answer": "The deficit rises from 6.4% to 8.5% of GDP, an increase of 2.1 points. Publicly held debt rises from 98% to 166% of GDP, an increase of 68 points.",
+      "sources": [{"doc": "crs-deficits-debt-limit-2024.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q19",
+      "category": "multi_hop",
+      "question": "How much shorter is Landsat Next's revisit time than the repeat cycle of Landsat 8 or 9 individually, and than both combined?",
+      "reference_answer": "Landsat Next revisits every 6 days: 10 days shorter than the 16-day repeat cycle of Landsat 8 or 9 individually, and 2 days shorter than their combined 8-day repeat cycle.",
+      "sources": [{"doc": "usgs-landsat-next-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q20",
+      "category": "multi_hop",
+      "question": "What do the NASA budget factsheet and the NOAA greenhouse gas factsheet each say about monitoring greenhouse gases?",
+      "reference_answer": "NASA's request funds prototyping a greenhouse gas monitoring and information system as part of an Earth Information Center, alongside $2.4 billion for Earth science and observations. NOAA describes the Annual Greenhouse Gas Index, ocean carbon observations, and satellites that monitor fires releasing greenhouse gases.",
+      "sources": [
+        {"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [1]},
+        {"doc": "noaa-greenhouse-gases-climate-factsheet-undated.pdf", "pages": [2]}
+      ],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q21",
+      "category": "multi_hop",
+      "question": "How many more people work in BLS STEM group 4-A than in group 1-D?",
+      "reference_answer": "4,243,810 more (4,777,850 minus 534,040).",
+      "sources": [{"doc": "bls-stem-employment-wages-undated.pdf", "pages": [3]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q22",
+      "category": "table_chart",
+      "question": "In the NASA budget chart, what budget is shown for FY 2027?",
+      "reference_answer": "$28.1 billion.",
+      "sources": [{"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [1]}],
+      "visual_dependent": true,
+      "notes": "Bar chart on page 1. The values also exist in the PDF text layer, so OCR may recover them."
+    },
+    {
+      "id": "Q23",
+      "category": "table_chart",
+      "question": "In the Landsat Next spectral band table, what is the pixel resolution and wavelength range of band 11, NIR Broad?",
+      "reference_answer": "10 m pixel resolution, 784.5-899.5 nm.",
+      "sources": [{"doc": "usgs-landsat-next-2024.pdf", "pages": [2]}],
+      "visual_dependent": true
+    },
+    {
+      "id": "Q24",
+      "category": "table_chart",
+      "question": "According to Table 1 of the CRS deficits report, what were federal revenues as a percentage of GDP in FY2024?",
+      "reference_answer": "17.1% of GDP (outlays 23.4%, deficit 6.4%).",
+      "sources": [{"doc": "crs-deficits-debt-limit-2024.pdf", "pages": [2]}],
+      "visual_dependent": true,
+      "notes": "Table has a text layer."
+    },
+    {
+      "id": "Q25",
+      "category": "table_chart",
+      "question": "What publicly held debt as a percentage of GDP does the CRS table project for FY2054?",
+      "reference_answer": "166% of GDP.",
+      "sources": [{"doc": "crs-deficits-debt-limit-2024.pdf", "pages": [2]}],
+      "visual_dependent": true,
+      "notes": "Table has a text layer."
+    },
+    {
+      "id": "Q26",
+      "category": "table_chart",
+      "question": "In the Census Bureau chart of population growth by city size and region, what was the average percent change for medium-sized places in the South in 2024-2025?",
+      "reference_answer": "1.2 percent (down from 1.6 percent in 2023-2024).",
+      "sources": [{"doc": "census-population-growth-slows-2026.jpg", "pages": [1]}],
+      "visual_dependent": true
+    },
+    {
+      "id": "Q27",
+      "category": "table_chart",
+      "question": "Which region and city-size group had negative average population change in 2024-2025 in the Census Bureau chart?",
+      "reference_answer": "Small places in the Northeast, at -0.2 percent.",
+      "sources": [{"doc": "census-population-growth-slows-2026.jpg", "pages": [1]}],
+      "visual_dependent": true
+    },
+    {
+      "id": "Q28",
+      "category": "table_chart",
+      "question": "By how many percentage points did 2024-2025 growth for small places in the South exceed that of small places in the Northeast?",
+      "reference_answer": "0.6 points (0.4 percent in the South minus -0.2 percent in the Northeast).",
+      "sources": [{"doc": "census-population-growth-slows-2026.jpg", "pages": [1]}],
+      "visual_dependent": true
+    },
+    {
+      "id": "Q29",
+      "category": "table_chart",
+      "question": "In which launch year does the USGS chart show the most Earth observing satellites launched, and which type dominates that year?",
+      "reference_answer": "2023, at roughly 247 satellites, dominated by commercial satellites.",
+      "sources": [{"doc": "usgs-earth-observing-satellites-launched-2026.png", "pages": [1]}],
+      "visual_dependent": true,
+      "approximate": true
+    },
+    {
+      "id": "Q30",
+      "category": "table_chart",
+      "question": "Which EU member state had the lowest household internet access in 2015 in the Eurostat chart, and roughly what percentage?",
+      "reference_answer": "Bulgaria, at roughly 59% of households.",
+      "sources": [{"doc": "eurostat-household-internet-access-2025.png", "pages": [1]}],
+      "visual_dependent": true,
+      "approximate": true
+    },
+    {
+      "id": "Q31",
+      "category": "table_chart",
+      "question": "Which EU member state had the highest median population age in 2025 in the Eurostat chart?",
+      "reference_answer": "Italy, at roughly 49 years.",
+      "sources": [{"doc": "eurostat-median-age-population-2025.png", "pages": [1]}],
+      "visual_dependent": true,
+      "approximate": true
+    },
+    {
+      "id": "Q32",
+      "category": "keyword",
+      "question": "What does P.L. 116-222 direct with respect to PRC firms?",
+      "reference_answer": "It directed U.S. audit oversight of, and reporting requirements for, People's Republic of China firms.",
+      "sources": [{"doc": "crs-evergrande-china-debt-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q33",
+      "category": "keyword",
+      "question": "What is the Worldwide Reference System-3?",
+      "reference_answer": "A new global notation system on which the Landsat Next satellites will provide higher spatial resolution observations.",
+      "sources": [{"doc": "usgs-landsat-next-2024.pdf", "pages": [1]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q34",
+      "category": "keyword",
+      "question": "What is BLS STEM group 3-C and what is its employment?",
+      "reference_answer": "Postsecondary teaching architecture occupations, with the lowest employment of the 20 groups at 7,340.",
+      "sources": [{"doc": "bls-stem-employment-wages-undated.pdf", "pages": [3]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q35",
+      "category": "keyword",
+      "question": "What is COSI in the NASA FY 2023 budget request?",
+      "reference_answer": "The Compton Spectrometer and Imager, a recently selected Explorers program mission funded under Astrophysics.",
+      "sources": [{"doc": "nasa-agency-budget-factsheet-2023.pdf", "pages": [2]}],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q36",
+      "category": "out_of_corpus",
+      "question": "What was the U.S. federal budget deficit as a percentage of GDP in fiscal year 2025?",
+      "reference_answer": "Not in the corpus. The CRS report gives FY2024 (6.4% of GDP) and projections for FY2054 only. A correct system says so or answers from the web with a web citation, and does not present the FY2024 or FY2054 figure as the FY2025 one.",
+      "sources": [],
+      "visual_dependent": false
+    },
+    {
+      "id": "Q37",
+      "category": "out_of_corpus",
+      "question": "When is Landsat 10 scheduled to launch?",
+      "reference_answer": "Not in the corpus, which covers Landsat Next (early 2030s) and Landsat 8 and 9 only. A correct system declines or uses a web source, and does not invent a date.",
+      "sources": [],
+      "visual_dependent": false
+    }
+  ]
+}
