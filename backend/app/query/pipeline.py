@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -6,15 +7,22 @@ from typing import Literal
 
 from app.core.config import settings
 from app.ingestion.indexer import get_keyword_index, get_vector_store
+from app.query import cache
 from app.query.expansion import expand_query
 from app.query.greeting import classify_greeting, match_greeting
 from app.query.guardrails.input import check_deterministic, check_llm
+from app.query.history import record_turn, resolve_question
 from app.query.retrieval import RetrievalResult, retrieve
 from app.shared.keyword_index import KeywordIndex
+from app.shared.schemas.citation import Citation
 from app.shared.session_store import PERSISTENT_SCOPE
 from app.shared.vector_store import VectorStore
 
-Stage = Literal["guardrail", "greeting", "guardrail_llm", "greeting_llm", "expansion", "retrieval"]
+logger = logging.getLogger(__name__)
+
+Stage = Literal[
+    "guardrail", "greeting", "guardrail_llm", "greeting_llm", "history", "cache", "expansion", "retrieval"
+]
 
 
 @dataclass(frozen=True)
@@ -25,12 +33,14 @@ class StageEvent:
 
 @dataclass
 class QueryResult:
-    terminated_at: Literal["guardrail", "greeting", "retrieved"]
+    terminated_at: Literal["guardrail", "greeting", "cache_hit", "retrieved"]
     raw_question: str
     resolved_question: str
     retrieval: RetrievalResult = field(default_factory=RetrievalResult)
     expanded_queries: list[str] = field(default_factory=list)
     response: str | None = None
+    answer: str | None = None
+    citations: list[Citation] = field(default_factory=list)
 
 
 EventCallback = Callable[[StageEvent], None]
@@ -40,7 +50,17 @@ def _stores() -> tuple[VectorStore, KeywordIndex]:
     return get_vector_store(), get_keyword_index()
 
 
-async def run_query(question: str, on_event: EventCallback | None = None) -> QueryResult:
+async def _lookup_cache(resolved_question: str) -> cache.CacheHit | None:
+    try:
+        return await asyncio.to_thread(cache.lookup, resolved_question, PERSISTENT_SCOPE)
+    except Exception:  # noqa: BLE001 - a broken cache must not block retrieval
+        logger.warning("answer cache lookup failed; continuing to retrieval", exc_info=True)
+        return None
+
+
+async def run_query(
+    question: str, session_id: str, on_event: EventCallback | None = None
+) -> QueryResult:
     @contextmanager
     def stage(name: Stage) -> Iterator[None]:
         if on_event:
@@ -70,9 +90,20 @@ async def run_query(question: str, on_event: EventCallback | None = None) -> Que
     if reply is not None:
         return QueryResult("greeting", question, sanitized, response=reply)
 
-    # [history slot]
-    resolved_question = sanitized
-    # [cache slot]
+    with stage("history"):
+        _, resolved_question = await resolve_question(session_id, sanitized)
+
+    with stage("cache"):
+        hit = await _lookup_cache(resolved_question)
+    if hit is not None:
+        record_turn(session_id, sanitized, resolved_question, hit.answer)
+        return QueryResult(
+            "cache_hit",
+            question,
+            resolved_question,
+            answer=hit.answer,
+            citations=hit.citations,
+        )
 
     with stage("expansion"):
         queries = await expand_query(resolved_question)
@@ -87,6 +118,7 @@ async def run_query(question: str, on_event: EventCallback | None = None) -> Que
             corpus_scope=PERSISTENT_SCOPE,
             top_k=settings.RETRIEVAL_TOP_K,
         )
+    record_turn(session_id, sanitized, resolved_question)
     return QueryResult(
         "retrieved", question, resolved_question, retrieval=retrieval, expanded_queries=queries
     )
