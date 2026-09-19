@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 
 from google import genai
@@ -80,6 +81,24 @@ class GeminiClient:
         self.tracker = tracker if tracker is not None else UsageTracker()
         self.max_retries = max_retries
         self.backoff_base = backoff_base
+        # Constructing an SDK client costs seconds, so build one per key and reuse it.
+        self._clients: dict[str, genai.Client] = {}
+        self._embedders: dict[tuple[str, str], GoogleGenerativeAIEmbeddings] = {}
+        self._cache_lock = threading.Lock()
+
+    def _client_for(self, api_key: str) -> genai.Client:
+        with self._cache_lock:
+            if api_key not in self._clients:
+                self._clients[api_key] = genai.Client(api_key=api_key)
+            return self._clients[api_key]
+
+    def _embedder_for(self, api_key: str, model_id: str) -> GoogleGenerativeAIEmbeddings:
+        with self._cache_lock:
+            if (api_key, model_id) not in self._embedders:
+                self._embedders[(api_key, model_id)] = GoogleGenerativeAIEmbeddings(
+                    model=model_id, google_api_key=api_key
+                )
+            return self._embedders[(api_key, model_id)]
 
     def _call_with_key_rotation(
         self, operation, *, scope: str = "", max_retries: int | None = None
@@ -131,8 +150,7 @@ class GeminiClient:
         config: types.GenerateContentConfig | None = None,
     ) -> str:
         def _operation(api_key: str) -> str:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
+            response = self._client_for(api_key).models.generate_content(
                 model=model, contents=prompt, config=config
             )
 
@@ -206,9 +224,7 @@ class GeminiClient:
         model_id = model if model.startswith("models/") else f"models/{model}"
 
         def _operation(api_key: str) -> list[list[float]]:
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model=model_id, google_api_key=api_key
-            )
+            embeddings = self._embedder_for(api_key, model_id)
             vectors: list[list[float]] = []
             for i, text in enumerate(texts):
                 if i and _EMBED_REQUEST_INTERVAL_SEC > 0:

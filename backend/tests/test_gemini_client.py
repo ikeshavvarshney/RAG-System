@@ -292,3 +292,27 @@ def test_all_keys_out_of_daily_quota_fails_fast_without_calling_the_api(monkeypa
         assert generate_content.call_count == 2
 
     assert sleeps == []
+
+
+def test_sdk_client_is_built_once_per_key(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a,key-b"))
+    client = GeminiClient(backoff_base=0)
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.return_value = _ok_response()
+        for _ in range(6):
+            client.generate(stage="s", model="m", prompt="p")
+
+    assert [c.kwargs["api_key"] for c in mock_client_cls.call_args_list] == ["key-a", "key-b"]
+
+
+def test_embedder_is_built_once_per_key_and_model(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    client = GeminiClient(backoff_base=0)
+
+    with patch("app.core.gemini_client.GoogleGenerativeAIEmbeddings") as mock_emb_cls:
+        mock_emb_cls.return_value.embed_documents.return_value = [[0.1]]
+        client.embed_batch(["x"], model="m")
+        client.embed_batch(["y"], model="m")
+
+    assert mock_emb_cls.call_count == 1
