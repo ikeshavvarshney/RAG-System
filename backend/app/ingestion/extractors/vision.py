@@ -12,11 +12,13 @@ surfaces as :class:`VisionExtractionError`, which the pipeline isolates
 per-file (D-19) rather than letting it crash the batch.
 
 D-28 / model choice (PROVISIONAL): the model is ``settings.VISION_MODEL``
-(currently ``"gemini-3.6-flash"``). The Flash-vs-Pro comparison could not be
-completed — the available API key has no Gemini Pro quota (HTTP 429/404 on
-every Pro model). Flash alone was evaluated on 8 real corpus figures and did
-well on structured table/chart transcription. Revisit when a Pro-capable key
-exists; switching models is one line in ``config.py``.
+(currently ``"gemini-3.5-flash-lite"``). ``gemini-3.6-flash`` transcribed
+figures slightly more fully (footnotes, trends) but its free tier allows 20
+requests a day per project, after which every page falls back to OCR. On 5
+corpus charts the Lite model read the same values within rounding and kept
+every series and category. The Flash-vs-Pro comparison could not be completed:
+the available key has no Gemini Pro quota. Switching models is one line in
+``config.py``; the cache key includes the model, so a switch re-extracts.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.core.config import settings
-from app.core.gemini_client import GeminiClient
+from app.core.gemini_client import GeminiClient, minimal_thinking_config
 from app.ingestion.extractors.ocr import OCRUnavailable, run_ocr
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,9 @@ _MIN_USABLE_CHARS = 12
 # fast to the OCR fallback (D-07) rather than burn minutes on backoff. The OCR
 # tagging (extraction_method="ocr", chunk_type="text") is unchanged.
 _VISION_MAX_RETRIES = 1
+
+# Generous: a dense 35-country chart needed ~2.2k tokens; this only stops a runaway reply.
+_VISION_MAX_OUTPUT_TOKENS = 8192
 
 _VISION_PROMPT = (
     "You are transcribing a figure from a document for a retrieval system.\n"
@@ -215,6 +220,7 @@ def extract_image(
             image_bytes=image_bytes,
             mime_type=mime_type,
             max_retries=_VISION_MAX_RETRIES,
+            config=minimal_thinking_config(_VISION_MAX_OUTPUT_TOKENS),
         )
     except Exception as exc:  # includes rate-limit pool exhausted (re-raised)
         fail_reason = f"vision call failed: {type(exc).__name__}: {exc}"

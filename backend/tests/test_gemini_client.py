@@ -316,3 +316,48 @@ def test_embedder_is_built_once_per_key_and_model(monkeypatch):
         client.embed_batch(["y"], model="m")
 
     assert mock_emb_cls.call_count == 1
+
+
+def test_minimal_thinking_config_uses_a_level_not_a_zero_budget():
+    config = gc.minimal_thinking_config(123)
+
+    assert config.thinking_config.thinking_level == gc.types.ThinkingLevel.MINIMAL
+    assert config.thinking_config.thinking_budget is None
+    assert config.max_output_tokens == 123
+
+
+def test_generate_vision_passes_config_to_the_sdk(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    client = GeminiClient(backoff_base=0)
+    config = gc.minimal_thinking_config(50)
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        generate_content = mock_client_cls.return_value.models.generate_content
+        generate_content.return_value = _ok_response("transcribed")
+
+        client.generate_vision("s", "m", "p", b"img", "image/png", config=config)
+
+    assert generate_content.call_args.kwargs["config"] is config
+
+
+def test_vision_daily_quota_blocks_the_key_for_that_model_only(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("only"))
+    client = GeminiClient(backoff_base=0)
+    used = []
+
+    def generate_content(model, **kwargs):
+        used.append(model)
+        if model == "vision-model":
+            raise RuntimeError(_DAILY_429)
+        return _ok_response()
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = generate_content
+
+        with pytest.raises(AllKeysBlocked):
+            client.generate_vision("s", "vision-model", "p", b"img", "image/png")
+        with pytest.raises(AllKeysBlocked):
+            client.generate_vision("s", "vision-model", "p", b"img", "image/png")
+        assert client.generate(stage="s", model="query-model", prompt="p") == "fine"
+
+    assert used == ["vision-model", "query-model"]

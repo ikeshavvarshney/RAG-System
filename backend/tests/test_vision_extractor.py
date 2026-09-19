@@ -286,3 +286,41 @@ def test_low_text_image_page_goes_to_vision_normal_page_does_not(monkeypatch):
     assert by_page[2]["extraction_method"] == "vision"
     assert by_page[2]["chunk_type"] == "image_caption"
     assert len(calls) == 1  # only the image page was dispatched
+
+
+def test_vision_call_uses_minimal_thinking_and_an_output_cap(monkeypatch):
+    seen = {}
+
+    def gen(**kw):
+        seen.update(kw)
+        return "CONTENT_TYPE: chart\nBar chart with values 1, 2, 3 on the y axis."
+
+    monkeypatch.setattr(vision._client, "generate_vision", gen)
+
+    vision.extract_image(_png())
+
+    config = seen["config"]
+    assert config.thinking_config.thinking_level == vision.minimal_thinking_config().thinking_config.thinking_level
+    assert config.max_output_tokens == vision._VISION_MAX_OUTPUT_TOKENS
+
+
+def test_vision_model_default_is_a_flash_lite_model():
+    assert "flash-lite" in settings.VISION_MODEL
+
+
+def test_all_keys_out_of_daily_quota_falls_back_to_ocr_without_a_retry_loop(monkeypatch):
+    from app.core.key_rotation import AllKeysBlocked
+
+    calls = []
+
+    def blocked(**kw):
+        calls.append(kw)
+        raise AllKeysBlocked("every key is out of quota for the vision model")
+
+    monkeypatch.setattr(vision._client, "generate_vision", blocked)
+    monkeypatch.setattr(vision, "run_ocr", lambda _image: "ocr text")
+
+    piece = vision.extract_image(_png())
+
+    assert piece["extraction_method"] == "ocr"
+    assert len(calls) == 1

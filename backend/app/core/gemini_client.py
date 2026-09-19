@@ -33,6 +33,14 @@ def _is_daily_quota_error(exc: BaseException) -> bool:
     return "perday" in str(exc).lower()
 
 
+def minimal_thinking_config(max_output_tokens: int | None = None) -> types.GenerateContentConfig:
+    # MINIMAL, not budget 0: the Lite models reject a zero budget.
+    return types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
+        max_output_tokens=max_output_tokens,
+    )
+
+
 # A key out of daily quota stays out until midnight Pacific; re-probe hourly.
 _DAILY_QUOTA_BLOCK_SEC = 3600
 
@@ -186,6 +194,7 @@ class GeminiClient:
         mime_type: str,
         *,
         max_retries: int | None = None,
+        config: types.GenerateContentConfig | None = None,
     ) -> str:
         """Send one image + text prompt to a Gemini vision model.
 
@@ -205,6 +214,7 @@ class GeminiClient:
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                     prompt,
                 ],
+                config=config,
             )
 
             usage = getattr(response, "usage_metadata", None)

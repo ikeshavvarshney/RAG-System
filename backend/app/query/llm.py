@@ -4,10 +4,8 @@ import logging
 import re
 from typing import Any
 
-from google.genai import types
-
 from app.core.config import settings
-from app.core.gemini_client import GeminiClient
+from app.core.gemini_client import GeminiClient, minimal_thinking_config
 
 logger = logging.getLogger(__name__)
 
@@ -17,21 +15,13 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _JSON_SPAN = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
 
 
-def _config(max_output_tokens: int) -> types.GenerateContentConfig:
-    # Thinking made these short calls 3-5x slower. MINIMAL, not budget 0: the Lite models reject a zero budget.
-    return types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
-        max_output_tokens=max_output_tokens,
-    )
-
-
 def warm_up() -> None:
     _client.warm_up_generation()
 
 
 async def generate(stage: str, prompt: str, max_output_tokens: int) -> str:
     return await asyncio.to_thread(
-        _client.generate, stage, settings.QUERY_MODEL, prompt, _config(max_output_tokens)
+        _client.generate, stage, settings.QUERY_MODEL, prompt, minimal_thinking_config(max_output_tokens)
     )
 
 

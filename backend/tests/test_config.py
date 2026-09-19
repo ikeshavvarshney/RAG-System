@@ -50,3 +50,9 @@ def test_absolute_storage_paths_are_kept(field, tmp_path):
     s = Settings(_env_file=None, **{field: str(tmp_path / "store")})
 
     assert getattr(s, field) == str(tmp_path / "store")
+
+
+def test_query_and_vision_models_default_to_flash_lite():
+    s = Settings(_env_file=None)
+
+    assert s.QUERY_MODEL == s.VISION_MODEL == "gemini-3.5-flash-lite"
