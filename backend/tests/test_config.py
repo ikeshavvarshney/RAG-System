@@ -19,16 +19,32 @@ def test_chunk_min_tokens_from_env():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, CHUNK_MIN_TOKENS=1000, CHUNK_MAX_TOKENS=500)
 
-def test_relative_chroma_path_resolves_against_backend_not_cwd(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "field", ["CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR"]
+)
+def test_relative_storage_paths_resolve_against_backend_not_cwd(field, tmp_path, monkeypatch):
     from app.core.config import _BACKEND_ROOT
 
     monkeypatch.chdir(tmp_path)
-    s = Settings(_env_file=None, CHROMA_PATH="./data/chroma")
+    s = Settings(_env_file=None, **{field: "./data/somewhere"})
 
-    assert s.CHROMA_PATH == str((_BACKEND_ROOT / "data" / "chroma").resolve())
+    assert getattr(s, field) == str((_BACKEND_ROOT / "data" / "somewhere").resolve())
 
 
-def test_absolute_chroma_path_is_kept(tmp_path):
-    s = Settings(_env_file=None, CHROMA_PATH=str(tmp_path / "store"))
+def test_defaults_resolve_to_absolute_paths_under_backend(tmp_path, monkeypatch):
+    from app.core.config import _BACKEND_ROOT
 
-    assert s.CHROMA_PATH == str(tmp_path / "store")
+    monkeypatch.chdir(tmp_path)
+    s = Settings(_env_file=None)
+
+    for field in ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR"):
+        assert getattr(s, field).startswith(str(_BACKEND_ROOT))
+
+
+@pytest.mark.parametrize(
+    "field", ["CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR"]
+)
+def test_absolute_storage_paths_are_kept(field, tmp_path):
+    s = Settings(_env_file=None, **{field: str(tmp_path / "store")})
+
+    assert getattr(s, field) == str(tmp_path / "store")

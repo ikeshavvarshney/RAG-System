@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_ROOT = _REPO_ROOT / "backend"
+_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -103,9 +104,10 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def resolve_chroma_path(self) -> "Settings":
+    def resolve_storage_paths(self) -> "Settings":
         # Relative to backend/, not the cwd: a different cwd would open an empty store.
-        self.CHROMA_PATH = str((_BACKEND_ROOT / self.CHROMA_PATH).resolve())
+        for name in _STORAGE_PATHS:
+            setattr(self, name, str((_BACKEND_ROOT / getattr(self, name)).resolve()))
         return self
 
     @model_validator(mode="after")
