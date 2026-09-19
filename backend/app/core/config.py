@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_BACKEND_ROOT = _REPO_ROOT / "backend"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -99,6 +100,12 @@ class Settings(BaseSettings):
             path = path / ("tesseract.exe" if os.name == "nt" else "tesseract")
 
         self.TESSERACT_CMD = str(path)
+        return self
+
+    @model_validator(mode="after")
+    def resolve_chroma_path(self) -> "Settings":
+        # Relative to backend/, not the cwd: a different cwd would open an empty store.
+        self.CHROMA_PATH = str((_BACKEND_ROOT / self.CHROMA_PATH).resolve())
         return self
 
     @model_validator(mode="after")
