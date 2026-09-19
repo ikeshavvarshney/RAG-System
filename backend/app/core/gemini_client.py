@@ -28,6 +28,14 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     return any(marker in blob for marker in _RATE_LIMIT_MARKERS)
 
 
+def _is_daily_quota_error(exc: BaseException) -> bool:
+    return "perday" in str(exc).lower()
+
+
+# A key out of daily quota stays out until midnight Pacific; re-probe hourly.
+_DAILY_QUOTA_BLOCK_SEC = 3600
+
+
 # langchain's GoogleGenerativeAIEmbeddings issues one embedContent request per
 # text (not a true batch call), so embed_batch() paces itself with this gap
 # between requests to stay under the free-tier embedding ceiling (100/min) with
@@ -73,7 +81,9 @@ class GeminiClient:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
 
-    def _call_with_key_rotation(self, operation, *, max_retries: int | None = None):
+    def _call_with_key_rotation(
+        self, operation, *, scope: str = "", max_retries: int | None = None
+    ):
         """Run ``operation(api_key)``; on a rate-limit error rotate to the next
         key and retry with exponential backoff.
 
@@ -88,14 +98,19 @@ class GeminiClient:
         attempts = retries + 1
         last_exc: BaseException | None = None
 
-        for attempt in range(attempts):
-            api_key = gemini_keys.next()
+        attempt = 0
+        while attempt < attempts:
+            api_key = gemini_keys.next(scope)
             try:
                 return operation(api_key)
             except Exception as exc:
                 if not _is_rate_limit_error(exc):
                     raise
                 last_exc = exc
+                if _is_daily_quota_error(exc):
+                    gemini_keys.block(api_key, scope, _DAILY_QUOTA_BLOCK_SEC)
+                    logger.warning("Gemini daily quota exhausted for a key; skipping it")
+                    continue
                 logger.warning(
                     "Gemini rate-limited (attempt %d/%d); rotating key and retrying",
                     attempt + 1,
@@ -103,6 +118,7 @@ class GeminiClient:
                 )
                 if attempt < attempts - 1 and self.backoff_base > 0:
                     time.sleep(self.backoff_base * (2**attempt))
+                attempt += 1
 
         assert last_exc is not None  # loop ran at least once
         raise last_exc
@@ -129,7 +145,7 @@ class GeminiClient:
             )
             return response.text
 
-        return self._call_with_key_rotation(_operation)
+        return self._call_with_key_rotation(_operation, scope=model)
 
     def generate_vision(
         self,
@@ -171,7 +187,9 @@ class GeminiClient:
                 )
             return response.text or ""
 
-        return self._call_with_key_rotation(_operation, max_retries=max_retries)
+        return self._call_with_key_rotation(
+            _operation, scope=model, max_retries=max_retries
+        )
 
     def embed_batch(self, texts: list[str], model: str) -> list[list[float]]:
         """Embed a batch of texts, returning one vector per input, in order.
@@ -198,4 +216,4 @@ class GeminiClient:
                 vectors.extend(embeddings.embed_documents([text]))
             return vectors
 
-        return self._call_with_key_rotation(_operation)
+        return self._call_with_key_rotation(_operation, scope=model_id)

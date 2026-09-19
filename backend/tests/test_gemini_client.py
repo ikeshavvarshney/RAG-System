@@ -4,7 +4,7 @@ import pytest
 
 from app.core import gemini_client as gc
 from app.core.gemini_client import GeminiClient, _is_rate_limit_error
-from app.core.key_rotation import KeyRotator
+from app.core.key_rotation import AllKeysBlocked, KeyRotator
 from app.core.usage import UsageTracker
 
 
@@ -192,3 +192,103 @@ def test_embed_batch_paces_between_requests(monkeypatch):
     assert len(vectors) == 4
     assert mock_emb_cls.return_value.embed_documents.call_count == 4  # one per text
     assert slept == [0.01, 0.01, 0.01]  # 3 gaps between 4 requests
+
+_DAILY_429 = (
+    "429 RESOURCE_EXHAUSTED. quotaId: "
+    "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+)
+
+
+def _ok_response(text: str = "fine") -> MagicMock:
+    ok = MagicMock()
+    ok.text = text
+    ok.usage_metadata.prompt_token_count = 1
+    ok.usage_metadata.candidates_token_count = 1
+    return ok
+
+
+def test_daily_quota_key_is_skipped_without_backoff(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("dead,live"))
+    sleeps = []
+    monkeypatch.setattr(gc.time, "sleep", sleeps.append)
+    client = GeminiClient(max_retries=0, backoff_base=1.0)
+
+    def fake_client(api_key, **kwargs):
+        instance = MagicMock()
+        if api_key == "dead":
+            instance.models.generate_content.side_effect = RuntimeError(_DAILY_429)
+        else:
+            instance.models.generate_content.return_value = _ok_response()
+        return instance
+
+    with patch("app.core.gemini_client.genai.Client", side_effect=fake_client):
+        assert client.generate(stage="s", model="m", prompt="p") == "fine"
+
+    assert sleeps == []
+
+
+def test_daily_quota_key_stays_skipped_on_later_calls(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("dead,live"))
+    client = GeminiClient(backoff_base=0)
+    used = []
+
+    def fake_client(api_key, **kwargs):
+        used.append(api_key)
+        instance = MagicMock()
+        if api_key == "dead":
+            instance.models.generate_content.side_effect = RuntimeError(_DAILY_429)
+        else:
+            instance.models.generate_content.return_value = _ok_response()
+        return instance
+
+    with patch("app.core.gemini_client.genai.Client", side_effect=fake_client):
+        client.generate(stage="s", model="m", prompt="p")
+        client.generate(stage="s", model="m", prompt="p")
+        client.generate(stage="s", model="m", prompt="p")
+
+    assert used.count("dead") == 1
+
+
+def test_daily_quota_block_is_per_model(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("only"))
+    client = GeminiClient(backoff_base=0)
+    used = []
+
+    def generate_content(model, **kwargs):
+        used.append(model)
+        if model == "model-a":
+            raise RuntimeError(_DAILY_429)
+        return _ok_response()
+
+    def fake_client(api_key, **kwargs):
+        instance = MagicMock()
+        instance.models.generate_content.side_effect = generate_content
+        return instance
+
+    with patch("app.core.gemini_client.genai.Client", side_effect=fake_client):
+        with pytest.raises(AllKeysBlocked):
+            client.generate(stage="s", model="model-a", prompt="p")
+        assert client.generate(stage="s", model="model-b", prompt="p") == "fine"
+
+    assert used == ["model-a", "model-b"]
+
+
+def test_all_keys_out_of_daily_quota_fails_fast_without_calling_the_api(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("a,b"))
+    sleeps = []
+    monkeypatch.setattr(gc.time, "sleep", sleeps.append)
+    client = GeminiClient(backoff_base=1.0)
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        generate_content = mock_client_cls.return_value.models.generate_content
+        generate_content.side_effect = RuntimeError(_DAILY_429)
+
+        with pytest.raises(AllKeysBlocked):
+            client.generate(stage="s", model="m", prompt="p")
+        assert generate_content.call_count == 2
+
+        with pytest.raises(AllKeysBlocked):
+            client.generate(stage="s", model="m", prompt="p")
+        assert generate_content.call_count == 2
+
+    assert sleeps == []

@@ -36,3 +36,35 @@ def test_concurrent_access_no_duplicates_or_errore():
 
     assert len(results) ==20 
     assert all(k in {"k1","k2","k3","k4","k5"} for k in results)
+
+
+def test_blocked_key_is_skipped_for_its_scope_only():
+    r = KeyRotator("k1,k2,k3")
+    r.block("k2", "model-a", 60)
+
+    assert [r.next("model-a") for _ in range(4)] == ["k1", "k3", "k1", "k3"]
+    assert "k2" in {r.next("model-b") for _ in range(3)}
+
+
+def test_block_expires(monkeypatch):
+    from app.core import key_rotation
+
+    now = [100.0]
+    monkeypatch.setattr(key_rotation.time, "monotonic", lambda: now[0])
+    r = KeyRotator("k1,k2")
+    r.block("k1", "m", 60)
+
+    assert {r.next("m") for _ in range(4)} == {"k2"}
+    now[0] += 61
+    assert {r.next("m") for _ in range(4)} == {"k1", "k2"}
+
+
+def test_all_keys_blocked_fails_fast():
+    from app.core.key_rotation import AllKeysBlocked
+
+    r = KeyRotator("k1,k2")
+    r.block("k1", "m", 60)
+    r.block("k2", "m", 60)
+
+    with pytest.raises(AllKeysBlocked):
+        r.next("m")
