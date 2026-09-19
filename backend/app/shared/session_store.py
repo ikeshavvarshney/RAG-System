@@ -126,6 +126,18 @@ def get_session_stores(session_id: str) -> tuple[VectorStore, KeywordIndex]:
     return stores
 
 
+def find_session_stores(session_id: str) -> tuple[VectorStore, KeywordIndex] | None:
+    """The session's stores if it has uploads, without creating any directory.
+
+    Every query carries a session id, so opening stores unconditionally would
+    leave an empty store on disk for each conversation that never uploaded.
+    """
+    if session_id not in _stores and not session_path(session_id).exists():
+        return None
+    stores = get_session_stores(session_id)
+    return stores if stores[0].count() > 0 else None
+
+
 def drop_session(session_id: str) -> bool:
     """Delete a session's store entirely. Returns whether anything was removed.
 

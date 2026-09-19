@@ -15,7 +15,7 @@ from app.query.history import record_turn, resolve_question
 from app.query.retrieval import RetrievalResult, retrieve
 from app.shared.keyword_index import KeywordIndex
 from app.shared.schemas.citation import Citation
-from app.shared.session_store import PERSISTENT_SCOPE
+from app.shared.session_store import PERSISTENT_SCOPE, find_session_stores, scope_for
 from app.shared.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,17 @@ class QueryResult:
 EventCallback = Callable[[StageEvent], None]
 
 
-def _stores() -> tuple[VectorStore, KeywordIndex]:
-    return get_vector_store(), get_keyword_index()
+def _select_scope(session_id: str) -> tuple[str, VectorStore, KeywordIndex]:
+    """Session uploads answer alone when present, otherwise the corpus does."""
+    session = find_session_stores(session_id)
+    if session is not None:
+        return scope_for(session_id), *session
+    return PERSISTENT_SCOPE, get_vector_store(), get_keyword_index()
 
 
-async def _lookup_cache(resolved_question: str) -> cache.CacheHit | None:
+async def _lookup_cache(resolved_question: str, scope: str) -> cache.CacheHit | None:
     try:
-        return await asyncio.to_thread(cache.lookup, resolved_question, PERSISTENT_SCOPE)
+        return await asyncio.to_thread(cache.lookup, resolved_question, scope)
     except Exception:  # noqa: BLE001 - a broken cache must not block retrieval
         logger.warning("answer cache lookup failed; continuing to retrieval", exc_info=True)
         return None
@@ -93,8 +97,12 @@ async def run_query(
     with stage("history"):
         _, resolved_question = await resolve_question(session_id, sanitized)
 
+    corpus_scope, vector_store, keyword_index = await asyncio.to_thread(
+        _select_scope, session_id
+    )
+
     with stage("cache"):
-        hit = await _lookup_cache(resolved_question)
+        hit = await _lookup_cache(resolved_question, corpus_scope)
     if hit is not None:
         record_turn(session_id, sanitized, resolved_question, hit.answer)
         return QueryResult(
@@ -109,13 +117,12 @@ async def run_query(
         queries = await expand_query(resolved_question)
 
     with stage("retrieval"):
-        vector_store, keyword_index = await asyncio.to_thread(_stores)
         retrieval = await retrieve(
             resolved_question,
             queries,
             vector_store=vector_store,
             keyword_index=keyword_index,
-            corpus_scope=PERSISTENT_SCOPE,
+            corpus_scope=corpus_scope,
             top_k=settings.RETRIEVAL_TOP_K,
         )
     record_turn(session_id, sanitized, resolved_question)

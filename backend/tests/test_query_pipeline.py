@@ -4,8 +4,11 @@ import json
 
 import pytest
 
+from app.core.config import settings
 from app.ingestion.indexer import index_chunks
 from app.query import cache, history, retrieval
+from app.shared import session_store
+from app.shared.session_store import get_session_stores, scope_for
 from app.query.pipeline import QueryResult, StageEvent, run_query
 from app.shared.schemas.chunk import Chunk
 from app.shared.schemas.citation import CorpusCitation
@@ -336,3 +339,59 @@ def test_sessions_do_not_share_history(fake_llm, corpus):
     _run("what about the appendix suppliers?", session_id="b" * 32)
 
     assert "query_history" not in _stages(fake_llm)
+
+
+@pytest.fixture
+def session_uploads(corpus, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "SESSION_STORE_ROOT", str(tmp_path / "sessions"))
+    session_store.reset_cache()
+    vector_store, keyword_index = get_session_stores(SESSION)
+    index_chunks(
+        [_chunk("u1", "revenue figures in my uploaded report", scope_for(SESSION))],
+        vector_store=vector_store,
+        keyword_index=keyword_index,
+    )
+    yield
+    session_store.reset_cache()
+
+
+def test_session_with_uploads_retrieves_only_from_its_uploads(fake_llm, session_uploads):
+    fake_llm.replies["query_guardrail"] = SAFE
+
+    result, _ = _run("how did revenue grow?")
+
+    hits = result.retrieval.vector_hits + result.retrieval.keyword_hits
+    assert {h.chunk_id for h in hits} == {"u1"}
+
+
+def test_other_sessions_keep_searching_the_corpus(fake_llm, session_uploads):
+    fake_llm.replies["query_guardrail"] = SAFE
+
+    result, _ = _run("how did revenue grow?", session_id="b" * 32)
+
+    hits = result.retrieval.vector_hits + result.retrieval.keyword_hits
+    assert "u1" not in {h.chunk_id for h in hits}
+    assert "c1" in {h.chunk_id for h in hits}
+
+
+def test_session_without_uploads_creates_no_store(fake_llm, corpus, tmp_path, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+    root = tmp_path / "sessions"
+    monkeypatch.setattr(settings, "SESSION_STORE_ROOT", str(root))
+    session_store.reset_cache()
+
+    _run("how did revenue grow?")
+
+    assert not root.exists() or not any(root.iterdir())
+
+
+def test_session_cache_entries_are_not_served_to_the_corpus(fake_llm, session_uploads):
+    fake_llm.replies["query_guardrail"] = SAFE
+    citations = [CorpusCitation(source_doc="u1.pdf", page=1, chunk_id="u1")]
+    cache.put("how did revenue grow?", "how did revenue grow?", "session answer", citations, scope_for(SESSION))
+
+    from_session, _ = _run("how did revenue grow?")
+    from_corpus, _ = _run("how did revenue grow?", session_id="b" * 32)
+
+    assert from_session.terminated_at == "cache_hit"
+    assert from_corpus.terminated_at == "retrieved"
