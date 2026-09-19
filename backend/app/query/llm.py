@@ -25,6 +25,10 @@ def _config(max_output_tokens: int) -> types.GenerateContentConfig:
     )
 
 
+def warm_up() -> None:
+    _client.warm_up_generation()
+
+
 async def generate(stage: str, prompt: str, max_output_tokens: int) -> str:
     return await asyncio.to_thread(
         _client.generate, stage, settings.QUERY_MODEL, prompt, _config(max_output_tokens)

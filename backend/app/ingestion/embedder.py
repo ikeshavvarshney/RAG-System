@@ -66,6 +66,10 @@ def embed_query(text: str) -> list[float]:
     return _embed_texts([text], _model_id())[0]
 
 
+def warm_up() -> None:
+    _client.warm_up_embeddings(_model_id())
+
+
 def embed_queries(texts: list[str]) -> list[list[float]]:
     return _embed_texts(texts, _model_id())
 

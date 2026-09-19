@@ -82,3 +82,8 @@ def fake_llm(monkeypatch):
     fake = FakeLLM()
     monkeypatch.setattr(llm, "generate", fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def no_startup_warm_up(monkeypatch):
+    monkeypatch.setattr("app.main.warm_up_clients", lambda: None)

@@ -28,6 +28,10 @@ class KeyRotator:
                     return key
             raise AllKeysBlocked(f"every key is out of quota for {scope or 'this pool'}")
 
+    @property
+    def keys(self) -> list[str]:
+        return list(self._keys)
+
     def block(self, key: str, scope: str, seconds: float) -> None:
         with self._lock:
             self._blocked[(key, scope)]=time.monotonic()+seconds

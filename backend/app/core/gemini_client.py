@@ -88,17 +88,29 @@ class GeminiClient:
 
     def _client_for(self, api_key: str) -> genai.Client:
         with self._cache_lock:
-            if api_key not in self._clients:
-                self._clients[api_key] = genai.Client(api_key=api_key)
-            return self._clients[api_key]
+            cached = self._clients.get(api_key)
+        if cached is not None:
+            return cached
+        built = genai.Client(api_key=api_key)  # slow, so built outside the lock
+        with self._cache_lock:
+            return self._clients.setdefault(api_key, built)
 
     def _embedder_for(self, api_key: str, model_id: str) -> GoogleGenerativeAIEmbeddings:
         with self._cache_lock:
-            if (api_key, model_id) not in self._embedders:
-                self._embedders[(api_key, model_id)] = GoogleGenerativeAIEmbeddings(
-                    model=model_id, google_api_key=api_key
-                )
-            return self._embedders[(api_key, model_id)]
+            cached = self._embedders.get((api_key, model_id))
+        if cached is not None:
+            return cached
+        built = GoogleGenerativeAIEmbeddings(model=model_id, google_api_key=api_key)
+        with self._cache_lock:
+            return self._embedders.setdefault((api_key, model_id), built)
+
+    def warm_up_generation(self) -> None:
+        for api_key in gemini_keys.keys:
+            self._client_for(api_key)
+
+    def warm_up_embeddings(self, model_id: str) -> None:
+        for api_key in gemini_keys.keys:
+            self._embedder_for(api_key, model_id)
 
     def _call_with_key_rotation(
         self, operation, *, scope: str = "", max_retries: int | None = None
