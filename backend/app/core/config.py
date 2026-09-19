@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     HISTORY_IDLE_HOURS: float = 24.0
     CACHE_PATH: str = "./data/answer_cache"
     # A hit bypasses the whole pipeline, so err high: a miss only costs a retrieval.
-    CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.94, ge=0.0, le=1.0)
+    # Real pairs: paraphrases 0.976-0.989, same-topic-different-question 0.93, unrelated 0.81.
+    CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.96, ge=0.0, le=1.0)
 
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)

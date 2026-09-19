@@ -92,7 +92,12 @@ def no_startup_warm_up(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def fresh_history(monkeypatch):
-    from app.query import history
+def fresh_query_state(tmp_path, monkeypatch):
+    from app.query import cache, history
 
     monkeypatch.setattr(history, "_store", history.HistoryStore())
+    monkeypatch.setattr(settings, "CACHE_PATH", str(tmp_path / "answer_cache"))
+    monkeypatch.setattr(cache, "_cache", None)
+    yield
+    if cache._cache is not None:
+        cache._cache.close()
