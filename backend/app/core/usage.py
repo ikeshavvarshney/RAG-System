@@ -15,12 +15,7 @@ class UsageEntry:
 
 
 class UsageTracker:
-    """Accumulates token usage per request, attributed by stage.
-
-    Local components (CrossEncoder, PaddleOCR — not used this sprint)
-    record zero tokens. Tavily counts searches, not tokens. Only real
-    Gemini calls, routed through GeminiClient, land here.
-    """
+    """Accumulates token usage per request, attributed by stage."""
 
     def __init__(self):
         self._entries: list[UsageEntry] = []

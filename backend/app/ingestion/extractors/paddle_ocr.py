@@ -1,17 +1,4 @@
-"""PaddleOCR text recognition, the primary OCR engine (D-27).
-
-Wraps PaddleOCR behind two things the rest of the pipeline needs: a lazily
-built, process-wide engine (model weights are fetched on first use and the
-construction costs tens of seconds, so it must not happen per image) and a
-single ``PaddleUnavailable`` error so ``ocr.run_ocr`` can fall back to
-Tesseract without knowing anything about paddle.
-
-``run_paddle_structure`` is the PP-StructureV3 half of D-27: layout analysis
-plus table structure recognition, returning markdown instead of a flat string.
-It is a separate entry point rather than a mode of ``run_paddle_ocr`` because
-it costs roughly 75s per page on CPU against roughly 3s for plain recognition,
-which is a different tool for a different job, not a better default.
-"""
+"""PaddleOCR text recognition, the primary OCR engine (D-27)."""
 
 import logging
 import re
@@ -46,9 +33,9 @@ def _build_engine():
         # oneDNN's CPU kernels raise "ConvertPirAttribute2RuntimeAttribute
         # not support" on this paddle build, so the plain CPU backend is used.
         enable_mkldnn=False,
-        # Document-level preprocessing costs seconds per image and the callers
-        # (PyMuPDF page renders, embedded figures) already hand us upright
-        # images, so orientation and dewarping stay off.
+        # Document-level preprocessing costs seconds per image and the callers (PyMuPDF page
+        # renders, embedded figures) already hand us upright images, so orientation and dewarping
+        # stay off.
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=settings.OCR_TEXTLINE_ORIENTATION,
@@ -56,12 +43,7 @@ def _build_engine():
 
 
 def get_engine():
-    """Return the shared PaddleOCR engine, building it on first use.
-
-    A failed build is remembered rather than retried: on a machine without
-    paddle installed, every page would otherwise pay a failing import before
-    reaching the Tesseract fallback.
-    """
+    """Return the shared PaddleOCR engine, building it on first use."""
     global _engine, _init_error
 
     if _engine is not None:
@@ -94,11 +76,7 @@ def reset_engine() -> None:
 
 
 def run_paddle_ocr(image: Image.Image) -> str:
-    """Recognise text in a PIL Image and return it in reading order.
-
-    Raises :class:`PaddleUnavailable` for both an unbuildable engine and a
-    failed inference call, so the caller has one thing to catch.
-    """
+    """Recognise text in a PIL Image and return it in reading order."""
     engine = get_engine()
     array = np.array(image.convert("RGB"))
 
@@ -113,12 +91,7 @@ def run_paddle_ocr(image: Image.Image) -> str:
 
 
 def _collect_text(results) -> str:
-    """Flatten PaddleOCR results into one newline-joined string.
-
-    Detections below OCR_MIN_CONFIDENCE are dropped: paddle emits a box for
-    noise such as page borders and rules, and that text would otherwise reach
-    the chunker as content.
-    """
+    """Flatten PaddleOCR results into one newline-joined string."""
     lines: list[str] = []
 
     for result in results or []:
@@ -152,9 +125,7 @@ _STRUCTURE_OPTIONS = dict(
     use_formula_recognition=False,
     use_chart_recognition=False,
     use_table_recognition=True,
-    # Mobile det/rec rather than the server default. Measured on a real corpus
-    # page, output length was within 3% of the server models at a fraction of
-    # the cost.
+    # Mobile det/rec rather than the server default.
     text_detection_model_name="PP-OCRv5_mobile_det",
     text_recognition_model_name="PP-OCRv5_mobile_rec",
 )
@@ -169,12 +140,7 @@ def _build_structure_engine():
 
 
 def get_structure_engine():
-    """Return the shared PP-StructureV3 pipeline, building it on first use.
-
-    Separate from :func:`get_engine`: the two load different model sets, and a
-    machine can perfectly well have plain recognition working while the
-    structure extra (``paddlex[ocr]``) is missing.
-    """
+    """Return the shared PP-StructureV3 pipeline, building it on first use."""
     global _structure_engine, _structure_init_error
 
     if _structure_engine is not None:
@@ -198,14 +164,7 @@ def get_structure_engine():
 
 
 def run_paddle_structure(image: Image.Image) -> str:
-    """Recognise one page with layout and table structure, returning markdown.
-
-    Tables come back from paddle as HTML, which the splitter does not
-    recognise, so they are rewritten as markdown pipe tables. The splitter
-    detects those itself and emits them as ``chunk_type="table"`` chunks kept
-    whole, which is the entire point of running structure recognition: a
-    recovered row-and-column table rather than cell text in reading order.
-    """
+    """Recognise one page with layout and table structure, returning markdown."""
     engine = get_structure_engine()
     array = np.array(image.convert("RGB"))
 
@@ -228,13 +187,7 @@ def run_paddle_structure(image: Image.Image) -> str:
 
 
 def _html_to_markdown(text: str) -> str:
-    """Rewrite HTML tables as markdown and drop paddle's layout wrapper tags.
-
-    Paddle centres blocks in ``<div style="text-align: center;">`` wrappers,
-    which carry no meaning once the text is a chunk. Non-table markup is
-    unwrapped rather than escaped so it never reaches an embedding as literal
-    angle brackets.
-    """
+    """Rewrite HTML tables as markdown and drop paddle's layout wrapper tags."""
     text = _TABLE_RE.sub(lambda match: _table_to_markdown(match.group(0)), text)
 
     from bs4 import BeautifulSoup
@@ -248,13 +201,7 @@ def _html_to_markdown(text: str) -> str:
 
 
 def _table_to_markdown(html: str) -> str:
-    """Convert one HTML table to a markdown pipe table.
-
-    Ragged rows are padded to the widest row: markdown has no notion of a
-    short row, and a table whose columns do not line up is worse to read than
-    one with a few empty cells. A table with no usable rows returns "" so the
-    caller drops it rather than emitting an empty pipe skeleton.
-    """
+    """Convert one HTML table to a markdown pipe table."""
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")

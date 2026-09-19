@@ -1,28 +1,4 @@
-"""Structure-aware text splitter (D-12, INGEST-03).
-
-Replaces the Week 2 fixed-size placeholder. The public interface is unchanged:
-
-    split(text: str, metadata: dict) -> list[dict]
-
-Behaviour:
-  * Normal prose is chunked with LangChain's ``RecursiveCharacterTextSplitter``,
-    targeting ``CHUNK_TARGET_TOKENS`` with a tiktoken (cl100k_base) length
-    function and heading-aware separators.
-  * Markdown table blocks are never split - each is emitted whole as a single
-    ``chunk_type="table"`` chunk, even when it exceeds ``CHUNK_MAX_TOKENS``.
-  * The nearest preceding markdown heading is carried into each chunk's
-    ``location`` field; absent any heading it falls back to
-    ``metadata.get("location")``.
-  * A sub-minimum trailing text fragment is merged back into the previous text
-    chunk instead of standing alone. Table chunks never take part in the merge.
-
-The Week 2 fixed-size splitter is retained verbatim as ``_split_fixed_size`` and
-can be re-enabled by setting ``FIXED_SIZE_MODE = True``; ``split()`` then
-delegates to it entirely.
-
-``corpus_scope``, ``dense_vector_id`` and ``embedding_model`` are populated
-downstream (pipeline / embedder) and are deliberately not set here.
-"""
+"""Structure-aware text splitter (D-12, INGEST-03)."""
 
 from __future__ import annotations
 
@@ -106,13 +82,7 @@ def split(text: str, metadata: dict) -> list[dict]:
 
 
 def _segment_blocks(text: str) -> list[tuple[str, str]]:
-    """Partition ``text`` into ordered ``(kind, block_text)`` pairs.
-
-    ``kind`` is ``"table"`` for a run of 2+ consecutive markdown table rows
-    (a real table always has a header plus a delimiter row); every other run,
-    including a lone stray pipe line, is ``"text"``. Adjacent text runs are
-    coalesced so a stray pipe line does not sever surrounding prose.
-    """
+    """Partition ``text`` into ordered ``(kind, block_text)`` pairs."""
     lines = text.split("\n")
     is_table = [bool(_TABLE_LINE_RE.match(line)) for line in lines]
 
@@ -143,10 +113,7 @@ def _is_heading_only(text: str) -> bool:
 
 
 def _attach_heading_only_chunks(chunks: list[dict]) -> None:
-    """Fold a text chunk that is nothing but heading line(s) into the next text
-    chunk, so a heading never stands alone as its own fragment. A heading-only
-    chunk with no following text chunk is left for the trailing-merge pass.
-    """
+    """Fold a text chunk that is nothing but heading line(s) into the next text chunk, so a heading never stands alone as its own fragment."""
     i = 0
     while i < len(chunks) - 1:
         cur, nxt = chunks[i], chunks[i + 1]
@@ -164,11 +131,7 @@ def _attach_heading_only_chunks(chunks: list[dict]) -> None:
 
 
 def _merge_trailing_fragments(chunks: list[dict]) -> None:
-    """Fold a sub-minimum trailing text chunk into the previous text chunk.
-
-    Mutates ``chunks`` in place. A table is never merged into text and text is
-    never merged into a table, so the loop stops at the first table boundary.
-    """
+    """Fold a sub-minimum trailing text chunk into the previous text chunk."""
     while len(chunks) >= 2:
         last, prev = chunks[-1], chunks[-2]
         if last["chunk_type"] != "text" or prev["chunk_type"] != "text":
@@ -192,9 +155,7 @@ def _text_splitter() -> RecursiveCharacterTextSplitter:
 def _make_chunk(
     text: str, metadata: dict, chunk_type: str, location: str | None
 ) -> dict:
-    """Build a chunk dict with every field ``Chunk`` requires except the ones
-    added downstream (``corpus_scope``, ``dense_vector_id``, ``embedding_model``).
-    """
+    """Build a chunk dict with every field ``Chunk`` requires except the ones added downstream (``corpus_scope``, ``dense_vector_id``, ``embedding_model``)."""
     return {
         "chunk_id": str(uuid.uuid4()),
         "text": text,
@@ -215,12 +176,7 @@ def _token_len(text: str) -> int:
 # FIXED_SIZE_MODE is True.
 # --------------------------------------------------------------------------- #
 def _split_fixed_size(text: str, metadata: dict) -> list[dict]:
-    """Fixed ~400-token windows with 50-token overlap (Week 2 windowing).
-
-    Kept only as a fallback/debug path behind ``FIXED_SIZE_MODE``. Emits the
-    same chunk-dict shape as the structure-aware path (``chunk_type="text"``
-    for every chunk) so ``Chunk(**chunk_dict)`` stays valid when the flag is on.
-    """
+    """Fixed ~400-token windows with 50-token overlap (Week 2 windowing)."""
     tokens = _ENCODING.encode(text)
 
     if len(tokens) <= _FIXED_TARGET_TOKENS:

@@ -48,11 +48,7 @@ def _pdf_bytes(text: str) -> bytes:
     ["../../chroma", "..", "a/b", "a\\b", "", "  ", "a" * 65, "-leading", "with space"],
 )
 def test_unsafe_session_ids_are_rejected(session_id):
-    """A crafted id must not be able to name a directory outside the root.
-
-    Without this, "../../chroma" would let an upload write into the corpus
-    store, or a delete remove it.
-    """
+    """A crafted id must not be able to name a directory outside the root."""
     with pytest.raises(InvalidSessionId):
         validate_session_id(session_id)
 
@@ -94,8 +90,7 @@ def test_stores_are_reused_within_a_session():
 
 
 def test_session_writes_do_not_reach_the_corpus_store(tmp_path, monkeypatch):
-    """The whole point of separate stores: a session upload is invisible to the
-    corpus store even without any scope filter being applied."""
+    """The whole point of separate stores: a session upload is invisible to the corpus store even without any scope filter being applied."""
     monkeypatch.setattr(settings, "CHROMA_PATH", str(tmp_path / "corpus"))
     corpus = VectorStore()
 
@@ -120,11 +115,7 @@ def test_session_writes_do_not_reach_the_corpus_store(tmp_path, monkeypatch):
 
 
 def test_bm25_statistics_are_per_store():
-    """Separate stores mean a session's uploads cannot shift corpus IDF.
-
-    The shared-index design filters scope after scoring, so this is the
-    property separation buys.
-    """
+    """Separate stores mean a session's uploads cannot shift corpus IDF."""
     _, keyword_a = get_session_stores("aaa")
     _, keyword_b = get_session_stores("bbb")
 
@@ -318,11 +309,7 @@ def test_delete_with_a_guessable_session_id_is_rejected():
 # --------------------------------------------------------------------------- #
 
 def test_delete_leaves_no_half_removed_store(monkeypatch):
-    """If removal fails after the rename, the session is still gone.
-
-    A plain rmtree failing halfway would leave a Chroma directory that still
-    opens and answers with whatever survived.
-    """
+    """If removal fails after the rename, the session is still gone."""
     session_id = new_session_id()
     get_session_stores(session_id)
 
@@ -427,8 +414,7 @@ def test_delete_one_document_leaves_the_others():
 
 
 def test_deleting_a_document_rebuilds_the_keyword_index():
-    """D-22: BM25 has no incremental delete, so a stale index would keep
-    returning a passage whose chunk is gone."""
+    """D-22: BM25 has no incremental delete, so a stale index would keep returning a passage whose chunk is gone."""
     client = TestClient(create_app())
     session_id = client.post("/api/session").json()["session_id"]
     _ingest(client, session_id, "alpha.pdf", "distinctive alpha content indexed here")
@@ -452,8 +438,7 @@ def test_deleting_an_absent_document_reports_zero():
 
 
 def test_document_delete_cannot_reach_another_session(tmp_path, monkeypatch):
-    """The scope is derived from the session id in the path, never trusted
-    from the document name."""
+    """The scope is derived from the session id in the path, never trusted from the document name."""
     client = TestClient(create_app())
     mine = client.post("/api/session").json()["session_id"]
     theirs = client.post("/api/session").json()["session_id"]

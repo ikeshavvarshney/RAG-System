@@ -25,9 +25,8 @@ class Settings(BaseSettings):
 #---Storage ----
     # The persistent corpus. Session uploads never land here.
     CHROMA_PATH: str = "./data/chroma"
-    # One Chroma directory per session, so a session's uploads are dropped by
-    # removing a directory and cannot contaminate the corpus that RQ1/RQ2 are
-    # measured against.
+    # One Chroma directory per session, so a session's uploads are dropped by removing a directory
+    # and cannot contaminate the corpus that RQ1/RQ2 are measured against.
     SESSION_STORE_ROOT: str = "./data/sessions"
     SESSION_TTL_HOURS: float = 24.0
     SESSION_MAX_DOCUMENTS: int = 5
@@ -88,16 +87,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def resolve_tesseract_cmd(self) -> "Settings":
-        """Normalise TESSERACT_CMD into an absolute path to the binary.
-
-        A relative path is taken as relative to the repo root, not to the
-        process working directory, so the same .env works under uvicorn (run
-        from backend/) and under pytest. A path naming the directory that
-        holds the binary is completed with the platform's binary name:
-        Windows reports executing a directory as PermissionError WinError 5,
-        "Access is denied", which reads like a permissions problem rather
-        than the configuration mistake it is.
-        """
+        """Normalise TESSERACT_CMD into an absolute path to the binary."""
         path = Path(self.TESSERACT_CMD)
 
         if not path.is_absolute():

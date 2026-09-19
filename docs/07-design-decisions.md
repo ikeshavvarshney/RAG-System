@@ -104,9 +104,9 @@ Because a cache hit bypasses the entire pipeline, no downstream stage can catch 
 
 *Reasoning:* the BM25 implementation maintains its own in-memory copy of passage text and provides no delete operation. A document removed from the vector store remains fully searchable through the sparse path, and can still be retrieved and quoted into an answer, until the index is rebuilt. At this corpus size a complete rebuild is effectively instantaneous, so no incremental approach is warranted.
 
-**D-23. Document deletion reaches four locations.** Vector store, keyword index, answer cache, and extraction cache.
+**D-23. Document deletion reaches three locations.** Vector store, keyword index, and answer cache.
 
-*Reasoning:* omitting any one leaves deleted content reachable by some path. Deletion is scoped, so that a session may delete only its own uploads, and operates on documents rather than passages, matching the user's mental model.
+*Reasoning:* omitting any one leaves deleted content reachable by some path. The extraction and embedding caches are keyed by content hash, not by document, and are not a retrieval path, so they are deliberately excluded. Deletion is scoped, so that a session may delete only its own uploads, and operates on documents rather than passages, matching the user's mental model.
 
 **D-24. Conversational context is bounded to the last 2-3 turns, and follow-up questions are resolved into self-contained form before any downstream stage.**
 

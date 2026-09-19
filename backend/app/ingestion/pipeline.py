@@ -37,18 +37,7 @@ def ingest_files(
     vector_store: VectorStore | None = None,
     keyword_index: KeywordIndex | None = None,
 ) -> IngestResult:
-    """Run every file through routing, extraction, splitting, then indexing.
-
-    Per D-19: an unsupported, corrupt, or unreadable file is skipped with
-    a clear per-file error, and the batch continues — one bad file in a
-    40-document ingest must not kill the rest.
-
-    After all chunks are produced they are embedded and written to the vector
-    store + keyword index (see :func:`app.ingestion.indexer.index_chunks`);
-    ``vector_store`` / ``keyword_index`` default to the process singletons,
-    which are the corpus store. A session upload passes that session's stores
-    explicitly, so its passages never enter the corpus.
-    """
+    """Run every file through routing, extraction, splitting, then indexing."""
     result = IngestResult()
 
     for filename, content in files:
@@ -58,9 +47,9 @@ def ingest_files(
             result.failed.append(FileError(filename=filename, reason=str(exc)))
             continue
         except Exception as exc:
-            # Corrupt/unreadable files raise all sorts of library-specific
-            # errors (BadZipFile, FzErrorFormat, etc.) — catch broadly here
-            # so one bad file can never take down the batch.
+            # Corrupt/unreadable files raise all sorts of library-specific errors (BadZipFile,
+            # FzErrorFormat, etc.) — catch broadly here so one bad file can never take down the
+            # batch.
             result.failed.append(FileError(filename=filename, reason=str(exc)))
             continue
 
@@ -98,10 +87,7 @@ def ingest_files(
 
 
 def _atomic_chunk(piece: dict, metadata: dict) -> dict:
-    """Wrap a self-contained vision piece as a single chunk, mirroring the dict
-    shape produced by ``splitter._make_chunk`` and preserving the piece's
-    ``chunk_type`` (which ``split()`` would otherwise reclassify to ``"text"``).
-    """
+    """Wrap a self-contained vision piece as a single chunk, mirroring the dict shape produced by ``splitter._make_chunk`` and preserving the piece's ``chunk_type`` (which ``split()`` would otherwise reclassify to ``"text"``)."""
     return {
         "chunk_id": str(uuid.uuid4()),
         "text": piece["text"],

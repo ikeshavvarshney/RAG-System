@@ -15,29 +15,17 @@ from app.shared.session_store import (
 
 router = APIRouter()
 
-# The research corpus is 50 documents and is uploaded in one request, so the
-# cap has to clear 50 rather than sit just under it. The headroom above that
-# is for a corpus that grows; the real ceiling on a batch is ingestion time,
-# not this number.
+# The research corpus is 50 documents and is uploaded in one request, so the cap has to clear 50
+# rather than sit just under it.
 MAX_FILES_PER_REQUEST = 60
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
-# File type is not validated here. Browsers set Content-Type from the file
-# extension, which is exactly what a mislabelled file gets wrong, so trusting
-# it would defeat the check. `route_file` sniffs magic bytes instead
-# (INGEST-01) and is the single place a type is decided.
+# File type is not validated here.
 
 
 @router.post("/ingest")
 async def ingest(files: list[UploadFile], session_id: str | None = Form(default=None)):
-    """Ingest documents into the corpus, or into one session's own store.
-
-    Without ``session_id`` the documents go to the persistent corpus. With one,
-    they go to that session's separate store and are tagged
-    ``corpus_scope="session:{id}"``. The default is the corpus because loading
-    the research corpus is the unattended path; a user upload is the one that
-    knows which session it belongs to and says so.
-    """
+    """Ingest documents into the corpus, or into one session's own store."""
     if len(files) > MAX_FILES_PER_REQUEST:
         raise HTTPException(
             status_code=413,
@@ -55,8 +43,6 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
 
         if len(content) > MAX_FILE_SIZE_BYTES:
             # Reported as its own failure rather than passed on as empty bytes.
-            # Empty bytes reach the extractor as an unreadable file, so the
-            # uploader is told the document is corrupt when it is merely large.
             oversized.append(
                 FileError(
                     filename=upload.filename,
@@ -125,26 +111,13 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
 
 @router.post("/session")
 async def create_session():
-    """Issue a session id for scoping uploads.
-
-    The id is generated here rather than accepted from the client because it is
-    the only thing protecting a session's uploads: there is no authentication,
-    so a guessable id would let anyone write into or delete someone else's
-    session.
-    """
+    """Issue a session id for scoping uploads."""
     return {"session_id": new_session_id()}
 
 
 @router.get("/session/{session_id}/documents")
 async def list_session_documents(session_id: str):
-    """What this session currently holds.
-
-    The frontend keeps its uploaded-document list in component state, which a
-    page reload discards; this is how it recovers. There is deliberately no
-    endpoint that enumerates *all* sessions: with no authentication the id is
-    the only thing protecting a session, so listing ids would hand every
-    visitor everyone else's uploads.
-    """
+    """What this session currently holds."""
     try:
         validate_issued_session_id(session_id)
         vector_store, _ = get_session_stores(session_id)
@@ -167,12 +140,7 @@ async def list_session_documents(session_id: str):
 
 @router.delete("/session/{session_id}/documents/{source_doc:path}")
 async def delete_session_document(session_id: str, source_doc: str):
-    """Remove one uploaded document from a session (USERDOC-02).
-
-    ``source_doc`` is a filename and may contain characters that need escaping
-    in a URL, so the path converter is used to take it whole. It never becomes
-    a filesystem path: it is only ever matched against chunk metadata.
-    """
+    """Remove one uploaded document from a session (USERDOC-02)."""
     try:
         validate_issued_session_id(session_id)
         vector_store, keyword_index = get_session_stores(session_id)
@@ -197,12 +165,7 @@ async def delete_session_document(session_id: str, source_doc: str):
 
 @router.delete("/session/{session_id}")
 async def delete_session(session_id: str):
-    """Drop a session's uploads entirely (USERDOC-02, whole-session form).
-
-    Removes the session's store directory, so nothing survives in either index.
-    Deleting a session that was never created is not an error: the caller's
-    intent, that the session hold nothing, is satisfied either way.
-    """
+    """Drop a session's uploads entirely (USERDOC-02, whole-session form)."""
     try:
         validate_issued_session_id(session_id)
         removed = drop_session(session_id)

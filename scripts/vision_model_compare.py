@@ -1,41 +1,4 @@
-"""D-28: empirical Flash-vs-Pro comparison for the vision extractor (INGEST-02).
-
-Downloads a handful of real corpus figures (Our World in Data / US Census /
-NOAA / USGS charts) and renders two real government-report table pages, then
-sends each image to every model in MODELS with the same structured
-transcription prompt (the same prompt vision.py uses). Raw responses are
-written under out/ for side-by-side review.
-
-Usage:
-    python scripts/vision_model_compare.py
-
-Requires GEMINI_API_KEYS in backend/.env.
-
---------------------------------------------------------------------------------
-FINDINGS (2026-09-05 run) — PROVISIONAL, Flash-only
-
-The free-tier key has NO usable Gemini Pro quota: gemini-pro-latest and
-gemini-3.1-pro-preview returned HTTP 429 on every call (even spaced 45s apart);
-gemini-2.5-pro returned HTTP 404 on :generateContent. So no Pro column exists
-yet — the comparison must be re-run when a Pro-capable key is available.
-
-gemini-3.6-flash (7/8 figures; 1 transient HTTP 503):
-  * Tables: transcribed a two-section USDA table (values + percent-share
-    sub-table) as clean markdown, kept footnotes and the source line, and also
-    transcribed a second figure on the same page with 13 years of data points.
-  * Charts: correctly named chart type (line / stacked bar / dual-axis combo /
-    choropleth), title, every axis label with units and visible range,
-    legend/series, and per-point value reads (explicitly hedged as approximate
-    on dense multi-series lines).
-  * Weak spots: multi-series line-chart values are eyeballed; choropleth gave
-    value bins + regional examples rather than per-country numbers; it
-    sometimes infers structure labels ("Table 4", "Figure 5").
-  * Latency 10-43 s/call (mean ~22 s), 600-1630 output tokens.
-
-Decision: keep VISION_MODEL="gemini-3.6-flash" as PROVISIONAL. Re-run this
-script against gemini-pro-latest once a paid key is available before locking.
---------------------------------------------------------------------------------
-"""
+"""D-28: empirical Flash-vs-Pro comparison for the vision extractor (INGEST-02)."""
 
 from __future__ import annotations
 

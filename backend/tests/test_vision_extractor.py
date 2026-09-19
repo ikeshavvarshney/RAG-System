@@ -176,12 +176,7 @@ def test_rate_limit_pool_exhausted_falls_back_to_ocr(monkeypatch):
 # MAX_VISION_PAGES hard cap
 # --------------------------------------------------------------------------- #
 def test_batch_over_cap_spends_budget_then_falls_back_to_ocr(monkeypatch):
-    """The cap bounds API spend, not how much of the file is read.
-
-    Every page must still come back: the first MAX_VISION_PAGES from vision,
-    the overflow from OCR. Failing the batch would discard the file's other
-    pages too, which is what D-19 forbids.
-    """
+    """The cap bounds API spend, not how much of the file is read."""
     monkeypatch.setattr(settings, "MAX_VISION_PAGES", 2)
 
     calls = {"n": 0}

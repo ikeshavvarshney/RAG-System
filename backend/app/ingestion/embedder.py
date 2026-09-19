@@ -1,25 +1,4 @@
-"""Dense embedding of chunks and query strings (INGEST-04, dense half).
-
-``embed_chunks`` turns a list of :class:`Chunk` into ``(chunk, vector)`` pairs;
-``embed_query`` embeds a single arbitrary string for the Week 4 query pipeline.
-Both go through :class:`GeminiClient` (key rotation + rate-limit retry) and both
-are backed by the same on-disk content-hash cache, so a text that has been
-embedded once — whether as a chunk or as a query — never hits the API again.
-
-Design notes
-------------
-* Vectors are returned *alongside* chunks as ``list[tuple[Chunk, list[float]]]``
-  rather than stored on the model: ``Chunk`` has no vector field (by design —
-  a 768-float list has no business travelling through the API layer), and
-  ``dense_vector_id`` is assigned later by ``vector_store.py`` when the vector
-  is actually written to Chroma. ``embedding_model`` *is* a ``Chunk`` field and
-  is set here (to ``settings.EMBEDDING_MODEL``) on a copy of each input chunk.
-* Cache format: one JSON file per entry, named ``<sha256>.json`` under
-  ``settings.EMBEDDING_CACHE_DIR``, containing just the vector as a JSON array.
-  Chosen over sqlite/shelve because entries are write-once/read-many, trivially
-  inspectable, corruption is isolated to a single key, and concurrent writers
-  never contend on one file. The hash key is ``sha256(model_id \\x00 text)``.
-"""
+"""Dense embedding of chunks and query strings (INGEST-04, dense half)."""
 
 from __future__ import annotations
 
@@ -42,12 +21,7 @@ _client = GeminiClient()
 
 
 def embed_chunks(chunks: list[Chunk]) -> list[tuple[Chunk, list[float]]]:
-    """Embed ``chunks`` and return ``(chunk, vector)`` pairs in input order.
-
-    Each returned chunk is a copy with ``embedding_model`` set to
-    ``settings.EMBEDDING_MODEL``. ``dense_vector_id`` is left untouched — that
-    is assigned downstream when the vector is written to the vector store.
-    """
+    """Embed ``chunks`` and return ``(chunk, vector)`` pairs in input order."""
     if not chunks:
         return []
 
@@ -84,11 +58,7 @@ def _model_id() -> str:
 
 
 def _embed_texts(texts: list[str], model_id: str) -> list[list[float]]:
-    """Return a vector per text, serving cache hits and batching cache misses.
-
-    Identical strings within the input are collapsed so each unique cache miss
-    is sent to the API exactly once.
-    """
+    """Return a vector per text, serving cache hits and batching cache misses."""
     results: list[list[float] | None] = [None] * len(texts)
 
     misses_by_text: dict[str, list[int]] = {}

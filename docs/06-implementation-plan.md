@@ -83,7 +83,9 @@ The full-corpus run at the end of this week is the first substantial workload ag
 | B | Input guardrails; greeting short-circuit; conversational resolution; semantic cache lookup; multi-query expansion; parallel dense and sparse retrieval; session upload with scoped retrieval; document listing and deletion |
 | A | Support for ingestion reuse in the upload and deletion paths; drafting of reference questions while the corpus is freshly in mind |
 
-**Verification:** greetings short-circuit without retrieval; follow-up questions resolve correctly against prior turns; cached answers are returned without cross-conversation collision; session uploads are retrievable only within their own scope; deleted documents disappear from both retrieval channels and from the cache.
+**Verification:** greetings short-circuit without retrieval; follow-up questions resolve correctly against prior turns; cached answers are returned without cross-conversation collision; session uploads are retrievable only within their own scope; deleted documents disappear from both retrieval channels and from the answer cache. Extraction and embedding caches are keyed by content hash, not by document, and are not a retrieval path, so deletion does not touch them.
+
+**Status:** complete. Session queries search only the session's own uploads when it has any, uploads are capped at 5 documents per session, and pipeline stage events carry durations and failure status. A 37-question draft reference set is in `data/eval/reference_set.json`; it needs a second read against the sources, and more questions drawn from the chart images, before Week 7.
 
 Pipeline-stage instrumentation is added during this week even though nothing consumes it yet. FRONTEND-03 requires live stage progress, and instrumenting a pipeline as it is written is substantially cheaper than retrofitting a completed one.
 

@@ -39,9 +39,7 @@ def test_normal_pages_tagged_as_text():
 
 
 def test_blank_page_tagged_as_text_not_scanned():
-    # A blank page has no text layer and no large image -> it is not a scan,
-    # just an empty page. The old interim "scanned" marker is gone; it must be
-    # a valid Chunk.extraction_method value.
+    # A blank page has no text layer and no large image -> it is not a scan, just an empty page.
     doc = pymupdf.open()
     doc.new_page()
     pdf_bytes = doc.tobytes()

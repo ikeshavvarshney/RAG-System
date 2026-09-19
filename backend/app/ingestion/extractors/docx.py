@@ -4,11 +4,7 @@ import docx
 
 
 def extract(content: bytes, filename: str):
-    """Extract body text and table-cell text from a DOCX file.
-
-    DOCX has no real page concept, so `page` is always None; `location`
-    carries a positional hint instead (paragraph index or table position).
-    """
+    """Extract body text and table-cell text from a DOCX file."""
     document = docx.Document(io.BytesIO(content))
     chunks = []
 

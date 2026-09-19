@@ -35,15 +35,7 @@ def _stub_vector(text: str, dim: int = 8) -> list[float]:
 
 @pytest.fixture(autouse=True)
 def isolate_index_stores(tmp_path, monkeypatch):
-    """Keep every test off the real Gemini API and the real ./data/chroma.
-
-    ``pipeline.ingest_files`` now runs the indexer as its final stage, so any
-    test that ingests would otherwise embed for real and write to the on-disk
-    Chroma. This points CHROMA_PATH at a per-test temp dir, resets the indexer
-    singletons, and swaps ``indexer.embed_chunks`` for a deterministic stub.
-    Tests that assert on indexing build their own VectorStore/KeywordIndex
-    against this same CHROMA_PATH.
-    """
+    """Keep every test off the real Gemini API and the real ./data/chroma."""
     from app.ingestion import indexer
 
     monkeypatch.setattr(settings, "CHROMA_PATH", str(tmp_path / "chroma"))

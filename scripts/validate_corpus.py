@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Validates data/corpus against the collection rules in data/corpus/README.md.
-
-This is the project gate. The constraints enforced here are the ones stated in
-the requirements and methodology docs (D-15 to D-18): 20-50 documents, at least
-eight with genuine tables or charts, at least one scanned/image-only PDF, at
-least one DOCX with embedded images, all three media families present, ASCII
-hyphenated filenames, and a complete manifest row per document.
-
-    python scripts/validate_corpus.py [--strict] [--write-summary]
-
-    --strict          exit 1 if any error was reported (default: exit 0)
-    --write-summary   regenerate data/corpus/MANIFEST.md
-
-Page counts and file sizes are read from disk where possible. PDF text-layer
-detection requires pypdf; without it the scanned-PDF check is reported as
-skipped rather than passed.
-"""
+"""Validates data/corpus against the collection rules in data/corpus/README.md."""
 from __future__ import annotations
 
 import argparse

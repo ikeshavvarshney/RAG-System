@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Measures the downloaded corpus and rewrites the manifest's `pages` column
-with true page counts. Run after scripts/fetch_corpus.sh, before
-scripts/validate_corpus.py.
-
-    pip install pypdf
-    python scripts/verify_corpus.py
-
-This script measures and writes back; it does not enforce anything. The
-sourcing targets the corpus was assembled against (50 files, 15 MB per file,
-250 MB total, 250-400 total pages) are printed as advisory notes, since they
-describe how the document list was chosen rather than what the project
-requires. The binding constraints live in scripts/validate_corpus.py.
-
-DOCX page counts cannot be computed reliably from Python (pagination is Word's
-layout engine), so those values are carried through from the manifest, where
-they were read off the Office web viewer. To measure one:
-    libreoffice --headless --convert-to pdf <file>   # then count the PDF pages
-"""
+"""Measures the downloaded corpus and rewrites the manifest's `pages` column with true page counts."""
 from __future__ import annotations
 
 import csv

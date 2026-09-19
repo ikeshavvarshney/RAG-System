@@ -156,7 +156,7 @@ flowchart TD
 
 ## 3.3 Document Deletion
 
-Deletion (USERDOC-02) must reach four locations. The keyword index is the one most easily overlooked.
+Deletion (USERDOC-02) must reach three locations. The keyword index is the one most easily overlooked. The extraction and embedding caches are keyed by content hash rather than by document, are never consulted for retrieval, and so cannot surface a deleted document; they are left in place.
 
 ```mermaid
 flowchart LR
@@ -164,7 +164,6 @@ flowchart LR
     LOOK --> CH["Vector store:<br/>targeted delete"]
     LOOK --> BM["Keyword index:<br/>full rebuild"]
     LOOK --> CA["Answer cache:<br/>invalidate entries<br/>citing this document"]
-    LOOK --> VC["Extraction cache:<br/>drop artifacts"]
 ```
 
 The BM25 implementation maintains its own in-memory copy of passage text and provides no delete operation. A document removed from the vector store therefore remains fully searchable through the sparse retrieval path, and can still be retrieved, reranked, and quoted into a generated answer, until the keyword index is rebuilt. At this corpus size a complete rebuild is effectively instantaneous, so no incremental approach is warranted.

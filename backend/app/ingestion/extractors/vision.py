@@ -1,25 +1,4 @@
-"""Gemini vision extraction for figures, with an OCR fallback (INGEST-02, D-07).
-
-For a standalone image or a low-text PDF page that looks like a figure, this
-module asks a Gemini vision model for a *structured* transcription — tables as
-markdown, charts as type + axes + data points — tags it ``chunk_type`` /
-``extraction_method="vision"``, and disk-caches the raw response by image hash.
-
-If the vision call fails (error, rate-limit pool exhausted) or comes back
-empty/unusable, it falls back to Tesseract OCR (``extraction_method="ocr"``,
-``chunk_type="text"``) and logs why. If OCR is also unavailable the image
-surfaces as :class:`VisionExtractionError`, which the pipeline isolates
-per-file (D-19) rather than letting it crash the batch.
-
-D-28 / model choice (PROVISIONAL): the model is ``settings.VISION_MODEL``
-(currently ``"gemini-3.5-flash-lite"``). ``gemini-3.6-flash`` transcribed
-figures slightly more fully (footnotes, trends) but its free tier allows 20
-requests a day per project, after which every page falls back to OCR. On 5
-corpus charts the Lite model read the same values within rounding and kept
-every series and category. The Flash-vs-Pro comparison could not be completed:
-the available key has no Gemini Pro quota. Switching models is one line in
-``config.py``; the cache key includes the model, so a switch re-extracts.
-"""
+"""Gemini vision extraction for figures, with an OCR fallback (INGEST-02, D-07)."""
 
 from __future__ import annotations
 
@@ -42,20 +21,15 @@ logger = logging.getLogger(__name__)
 _client = GeminiClient()
 
 # --- page-selection heuristic thresholds --------------------------------------
-# A PDF page goes to the vision pass only when it has almost no text layer AND a
-# raster image covers most of it (i.e. it is a scanned page or a full-bleed
-# figure). A page with real body text is left to the normal text extractor even
-# if it also contains a chart.
+# A PDF page goes to the vision pass only when it has almost no text layer AND a raster image covers
+# most of it (i.e.
 LOW_TEXT_CHAR_LIMIT = 100
 LARGE_IMAGE_COVERAGE = 0.50
 
 # Shortest model response we will treat as a usable transcription.
 _MIN_USABLE_CHARS = 12
 
-# Key-rotation retry budget for a single vision call. Kept low (2 total
-# attempts) on purpose: when the key pool is quota-throttled we want to fail
-# fast to the OCR fallback (D-07) rather than burn minutes on backoff. The OCR
-# tagging (extraction_method="ocr", chunk_type="text") is unchanged.
+# Key-rotation retry budget for a single vision call.
 _VISION_MAX_RETRIES = 1
 
 # Generous: a dense 35-country chart needed ~2.2k tokens; this only stops a runaway reply.
@@ -87,21 +61,11 @@ _DECLARED_TO_CHUNK_TYPE = {
 
 
 class VisionExtractionError(Exception):
-    """Vision AND OCR both failed for one image.
-
-    Raised so the ingestion pipeline can record a per-file failure (D-19)
-    instead of aborting the whole batch.
-    """
+    """Vision AND OCR both failed for one image."""
 
 
 class VisionPageCapExceeded(VisionExtractionError):
-    """A vision batch selected more pages than ``settings.MAX_VISION_PAGES``.
-
-    No longer raised by :func:`extract_pages`, which now spends the cap as a
-    budget and sends the overflow to OCR. Kept so a caller that still catches
-    it does not break, and so the name stays reserved for a genuinely fatal
-    cap should one be reintroduced.
-    """
+    """A vision batch selected more pages than ``settings.MAX_VISION_PAGES``."""
 
     def __init__(self, selected: int, cap: int):
         self.selected = selected
@@ -141,19 +105,7 @@ def page_needs_vision(text: str, image_coverage: float) -> bool:
 # Extraction
 # --------------------------------------------------------------------------- #
 def extract_pages(items: list[VisionPage]) -> list[dict]:
-    """Run the vision pass over a batch, spending MAX_VISION_PAGES as a budget.
-
-    The cap bounds API spend on one file, not how much of the file is read.
-    The first ``MAX_VISION_PAGES`` pages get vision; the overflow goes straight
-    to OCR and is tagged ``extraction_method="ocr"``, so a 200-page scan yields
-    200 indexed pages of mixed quality rather than nothing at all.
-
-    This replaces an earlier hard refusal. Failing the batch discarded the
-    file's text pages too, which contradicts D-19 (one oversized file must not
-    cost the corpus that file) and D-07 (an unavailable vision path degrades to
-    OCR rather than dropping content). Budget order is page order: pages are
-    queued in document order, so the overflow is the tail of the document.
-    """
+    """Run the vision pass over a batch, spending MAX_VISION_PAGES as a budget."""
     cap = settings.MAX_VISION_PAGES
     if len(items) > cap:
         logger.warning(
@@ -194,11 +146,7 @@ def extract_image(
     location: str | None = None,
     mime_type: str = "image/png",
 ) -> dict:
-    """Transcribe one image, falling back to OCR. Returns a piece dict:
-    ``{page, location, text, extraction_method, chunk_type}``.
-
-    Raises :class:`VisionExtractionError` only when vision *and* OCR both fail.
-    """
+    """Transcribe one image, falling back to OCR."""
     model_id = settings.VISION_MODEL
 
     cache_key = _cache_key(image_bytes, model_id)

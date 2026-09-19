@@ -98,11 +98,7 @@ def test_ingest_failure_still_recorded_alongside_zeroed_index_breakdown():
 # --------------------------------------------------------------------------- #
 
 def test_batch_over_file_limit_is_rejected_with_413():
-    """An over-limit batch must be an error status, not a 200 carrying a note.
-
-    The uploader script checks the status code; a 200 with an "error" key
-    reads as a successful ingest that produced no chunks.
-    """
+    """An over-limit batch must be an error status, not a 200 carrying a note."""
     from app.api.routes.ingest import MAX_FILES_PER_REQUEST
 
     client = TestClient(create_app())

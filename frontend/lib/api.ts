@@ -6,10 +6,7 @@ export interface HealthResponse {
   version: string;
 }
 
-/**
- * Join base + /api + path, collapsing duplicate slashes.
- * apiUrl("/health") -> "http://localhost:8000/api/health"
- */
+/** Join base + /api + path, collapsing duplicate slashes. */
 export function apiUrl(path: string): string {
   const base = API_BASE_URL.replace(/\/+$/, "");
   const suffix = `/${path}`.replace(/\/{2,}/g, "/");
@@ -61,12 +58,8 @@ export type IngestTarget = "corpus" | "session";
 
 const SESSION_KEY = "rag.session_id";
 
-// localStorage, not sessionStorage: sessionStorage is cleared when the tab
-// closes, which loses the id while the server still holds the uploads. The
-// store then survives, unreachable, until it expires. Remembering the id keeps
-// a session's own uploads deletable by the only party entitled to delete them.
-// The tradeoff is that uploads outlive the tab on a shared machine, which the
-// server-side TTL bounds.
+// localStorage, not sessionStorage: sessionStorage is cleared when the tab closes, which loses the
+// id while the server still holds the uploads.
 function readStoredId(): string | null {
   try {
     return localStorage.getItem(SESSION_KEY);
@@ -85,13 +78,7 @@ function writeStoredId(sessionId: string | null): void {
   }
 }
 
-/**
- * The current session id, asking the backend for one on first use.
- *
- * Ids are issued server-side and never invented here: with no authentication,
- * the id is the only thing protecting a session's uploads, so a guessable one
- * would let anyone write into or delete someone else's session.
- */
+/** The current session id, asking the backend for one on first use. */
 export async function getSessionId(): Promise<string> {
   const stored = readStoredId();
   if (stored) return stored;
@@ -165,9 +152,7 @@ export async function deleteSession(): Promise<boolean> {
     method: "DELETE",
   });
 
-  // Only forget the id once the server has confirmed. Forgetting first would
-  // strand the uploads: the server still holds them and the client can no
-  // longer name them, so nothing but the TTL could ever remove them.
+  // Only forget the id once the server has confirmed.
   if (!response.ok) {
     throw new Error(`Could not clear the session: ${response.status}`);
   }
@@ -200,13 +185,7 @@ export function rejectionReason(file: File): string | null {
   return null;
 }
 
-/**
- * Upload files to the ingestion endpoint.
- *
- * XMLHttpRequest rather than fetch, because fetch cannot report upload
- * progress. The upload is quick; extraction and embedding then run for minutes
- * with nothing on the wire, and without that distinction the page looks frozen.
- */
+/** Upload files to the ingestion endpoint. */
 export function ingestFiles(
   files: File[],
   onUploadProgress?: (fraction: number) => void,

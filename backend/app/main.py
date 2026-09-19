@@ -22,12 +22,7 @@ async def _warm_up() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Collect expired session stores, and debris from any failed delete.
-
-    Session uploads are ephemeral by design, but nothing expires them on its
-    own. A sweep at startup is enough for a locally run service; a long-lived
-    deployment would want this on a timer too.
-    """
+    """Collect expired session stores, and debris from any failed delete."""
     try:
         removed = purge_expired()
         if removed:

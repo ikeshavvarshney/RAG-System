@@ -52,17 +52,9 @@ _DAILY_QUOTA_BLOCK_SEC = 3600
 _EMBED_REQUEST_INTERVAL_SEC = 0.9
 
 
-# Vision-only SDK client options: a per-request cap and NO SDK-internal retry
-# (default is 5 attempts with up to 60s backoff), so a wedged call drops to the
-# OCR fallback (D-07) instead of the SDK's own retry loop grinding for minutes.
-# generate() and embed_batch() build their clients separately and keep the SDK
-# defaults.
-#
-# The cap is 60s, not the 15s used previously. A throttled key was the failure
-# that 15s was meant to short-circuit, but throttling returns 429 immediately
-# and is already handled by key rotation; the cap only ever fired on healthy
-# calls. Transcribing one figure with _VISION_PROMPT measures ~30s, so 15s
-# timed out every vision call and silently degraded every figure to OCR.
+# Vision-only SDK client options: a per-request cap and NO SDK-internal retry (default is 5 attempts
+# with up to 60s backoff), so a wedged call drops to the OCR fallback (D-07) instead of the SDK's
+# own retry loop grinding for minutes.
 _VISION_HTTP_OPTIONS = types.HttpOptions(
     timeout=60_000,  # milliseconds
     retry_options=types.HttpRetryOptions(attempts=1),
@@ -70,14 +62,7 @@ _VISION_HTTP_OPTIONS = types.HttpOptions(
 
 
 class GeminiClient:
-    """Single wrapper owning key rotation + usage recording for every
-    Gemini call. A call that bypasses this wrapper bypasses both —
-    that's obvious in review, and is the whole point of D-32.
-
-    Every outbound call goes through :meth:`_call_with_key_rotation`, which
-    rotates to the next key in the pool and retries with exponential backoff
-    when the API reports a rate limit; any other error propagates immediately.
-    """
+    """Single wrapper owning key rotation + usage recording for every Gemini call."""
 
     def __init__(
         self,
@@ -123,16 +108,7 @@ class GeminiClient:
     def _call_with_key_rotation(
         self, operation, *, scope: str = "", max_retries: int | None = None
     ):
-        """Run ``operation(api_key)``; on a rate-limit error rotate to the next
-        key and retry with exponential backoff.
-
-        Up to ``max_retries`` additional attempts are made (falling back to
-        ``self.max_retries`` when the argument is ``None``), so a call site that
-        should fail fast — e.g. the vision path against a throttled key, which
-        then falls back to OCR — can lower it without affecting the others.
-        Non-rate-limit errors are re-raised on the spot; if every attempt is
-        rate-limited the last such error is re-raised.
-        """
+        """Run ``operation(api_key)``; on a rate-limit error rotate to the next key and retry with exponential backoff."""
         retries = self.max_retries if max_retries is None else max_retries
         attempts = retries + 1
         last_exc: BaseException | None = None
@@ -196,15 +172,7 @@ class GeminiClient:
         max_retries: int | None = None,
         config: types.GenerateContentConfig | None = None,
     ) -> str:
-        """Send one image + text prompt to a Gemini vision model.
-
-        Shares the key-rotation pool and rate-limit retry with :meth:`generate`
-        via :meth:`_call_with_key_rotation`; ``max_retries`` overrides the
-        rotation retry budget for this call only (the vision path passes a low
-        value so it fails fast to OCR when the key is throttled). Usage is
-        recorded when the response carries token counts. Returns the model's
-        text (``""`` if it returned none — the caller decides usability).
-        """
+        """Send one image + text prompt to a Gemini vision model."""
 
         def _operation(api_key: str) -> str:
             client = genai.Client(api_key=api_key, http_options=_VISION_HTTP_OPTIONS)
@@ -232,14 +200,7 @@ class GeminiClient:
         )
 
     def embed_batch(self, texts: list[str], model: str) -> list[list[float]]:
-        """Embed a batch of texts, returning one vector per input, in order.
-
-        Shares the key-rotation pool and rate-limit retry with :meth:`generate`.
-        Because the underlying API is one request per text, this sleeps
-        ``_EMBED_REQUEST_INTERVAL_SEC`` between requests to stay under the
-        free-tier per-minute cap. The embeddings API returns no token counts, so
-        — per D-32: record real numbers or none — no usage is recorded here.
-        """
+        """Embed a batch of texts, returning one vector per input, in order."""
         if not texts:
             return []
 

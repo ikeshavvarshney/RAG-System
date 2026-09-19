@@ -6,15 +6,7 @@ def _mime_for(content: bytes) -> str:
 
 
 def extract(content: bytes, filename: str):
-    """Standalone images always get the vision pass (INGEST-02).
-
-    ``vision.extract_image`` performs the OCR fallback internally and only
-    raises ``VisionExtractionError`` when vision *and* OCR both fail; that
-    propagates for the pipeline to isolate per-file (D-19).
-
-    An image that yields no text at all (blank/decorative) produces zero
-    chunks rather than a chunk of whitespace.
-    """
+    """Standalone images always get the vision pass (INGEST-02)."""
     piece = vision.extract_image(
         content, page=None, location=None, mime_type=_mime_for(content)
     )

@@ -92,12 +92,7 @@ def test_both_engines_gone_raises_ocr_unavailable(monkeypatch):
 
 
 def test_unexecutable_tesseract_is_ocr_unavailable(monkeypatch):
-    """A binary the OS refuses to run must degrade like a missing one.
-
-    The vendored Windows copy can raise PermissionError (WinError 5). If that
-    escapes as itself, one broken install fails every page instead of being
-    reported once as an unavailable engine.
-    """
+    """A binary the OS refuses to run must degrade like a missing one."""
     monkeypatch.setattr(settings, "OCR_ENGINE", "tesseract")
 
     def _denied(image):

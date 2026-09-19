@@ -9,13 +9,7 @@ _VISION_RENDER_DPI = 150
 
 
 def extract(content: bytes, filename: str):
-    """Extract text from a PDF, page by page.
-
-    Pages with a usable text layer are extracted directly. Pages with almost no
-    text layer are handed to the vision path (vision.py), which resolves each
-    to extraction_method="vision" or, on fallback, "ocr" — the old interim
-    "scanned" marker (not a valid Chunk.extraction_method) is gone.
-    """
+    """Extract text from a PDF, page by page."""
     doc = pymupdf.open(stream=content, filetype="pdf")
     pages = []
     vision_queue: list[vision.VisionPage] = []
@@ -29,9 +23,8 @@ def extract(content: bytes, filename: str):
             )
             continue
 
-        # Low text layer: send to vision only if a large embedded image says
-        # this page is a scan / full-bleed figure; otherwise it's just a sparse
-        # page and its (little) text stands as-is.
+        # Low text layer: send to vision only if a large embedded image says this page is a scan /
+        # full-bleed figure; otherwise it's just a sparse page and its (little) text stands as-is.
         if vision.page_needs_vision(text, _image_coverage(page)):
             vision_queue.append(
                 vision.VisionPage(
@@ -48,10 +41,8 @@ def extract(content: bytes, filename: str):
     doc.close()
 
     if vision_queue:
-        # extract_pages spends MAX_VISION_PAGES as a budget, sending overflow
-        # pages to OCR rather than failing. It still raises
-        # VisionExtractionError when a page has no usable output from either
-        # engine; that propagates for the pipeline to isolate per-file (D-19).
+        # extract_pages spends MAX_VISION_PAGES as a budget, sending overflow pages to OCR rather
+        # than failing.
         pages.extend(vision.extract_pages(vision_queue))
 
     pages.sort(key=lambda piece: piece["page"])
