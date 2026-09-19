@@ -18,9 +18,9 @@ _JSON_SPAN = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
 
 
 def _config(max_output_tokens: int) -> types.GenerateContentConfig:
-    # Thinking tokens made these short calls 3-5x slower and are not needed for them.
+    # Thinking made these short calls 3-5x slower. MINIMAL, not budget 0: the Lite models reject a zero budget.
     return types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
         max_output_tokens=max_output_tokens,
     )
 

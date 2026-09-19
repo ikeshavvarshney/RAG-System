@@ -11,7 +11,7 @@ from app.query.greeting import classify_greeting
 from app.query.guardrails.input import check_llm
 
 
-def test_generate_disables_thinking_and_caps_output(monkeypatch):
+def test_generate_minimises_thinking_and_caps_output(monkeypatch):
     client = MagicMock()
     client.generate.return_value = "ok"
     monkeypatch.setattr(llm, "_client", client)
@@ -20,7 +20,7 @@ def test_generate_disables_thinking_and_caps_output(monkeypatch):
 
     stage, model, prompt, config = client.generate.call_args.args
     assert (stage, model, prompt) == ("stage", settings.QUERY_MODEL, "prompt")
-    assert config.thinking_config.thinking_budget == 0
+    assert config.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL
     assert config.max_output_tokens == 123
 
 
