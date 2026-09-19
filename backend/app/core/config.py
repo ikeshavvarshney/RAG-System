@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
 
     #--- Query pipeline (Week 4) ---
-    QUERY_MODEL: str = "gemini-3.6-flash"
+    QUERY_MODEL: str = "gemini-3.5-flash-lite"
     QUERY_MAX_CHARS: int = 2000
     # Total queries sent to dense search, the original included.
     EXPANSION_COUNT: int = Field(default=4, ge=3, le=5)
