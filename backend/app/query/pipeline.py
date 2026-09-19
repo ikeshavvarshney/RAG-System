@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -28,7 +29,8 @@ Stage = Literal[
 @dataclass(frozen=True)
 class StageEvent:
     stage: Stage
-    status: Literal["started", "completed"]
+    status: Literal["started", "completed", "failed"]
+    duration_ms: float | None = None
 
 
 @dataclass
@@ -44,6 +46,10 @@ class QueryResult:
 
 
 EventCallback = Callable[[StageEvent], None]
+
+
+def _elapsed_ms(began: float) -> float:
+    return round((time.perf_counter() - began) * 1000, 1)
 
 
 def _select_scope(session_id: str) -> tuple[str, VectorStore, KeywordIndex]:
@@ -69,9 +75,15 @@ async def run_query(
     def stage(name: Stage) -> Iterator[None]:
         if on_event:
             on_event(StageEvent(name, "started"))
-        yield
+        began = time.perf_counter()
+        try:
+            yield
+        except BaseException:
+            if on_event:
+                on_event(StageEvent(name, "failed", _elapsed_ms(began)))
+            raise
         if on_event:
-            on_event(StageEvent(name, "completed"))
+            on_event(StageEvent(name, "completed", _elapsed_ms(began)))
 
     with stage("guardrail"):
         verdict = check_deterministic(question)

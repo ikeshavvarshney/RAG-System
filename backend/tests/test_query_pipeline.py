@@ -395,3 +395,29 @@ def test_session_cache_entries_are_not_served_to_the_corpus(fake_llm, session_up
 
     assert from_session.terminated_at == "cache_hit"
     assert from_corpus.terminated_at == "retrieved"
+
+
+def test_completed_events_carry_a_duration(fake_llm, corpus):
+    fake_llm.replies["query_guardrail"] = SAFE
+    events: list[StageEvent] = []
+
+    asyncio.run(run_query("how did revenue grow?", SESSION, on_event=events.append))
+
+    done = [e for e in events if e.status == "completed"]
+    assert done and all(e.duration_ms is not None and e.duration_ms >= 0 for e in done)
+    assert all(e.duration_ms is None for e in events if e.status == "started")
+
+
+def test_a_raising_stage_emits_failed_and_propagates(fake_llm, corpus, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+
+    async def boom(_):
+        raise RuntimeError("expansion down")
+
+    monkeypatch.setattr("app.query.pipeline.expand_query", boom)
+    events: list[StageEvent] = []
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run_query("how did revenue grow?", SESSION, on_event=events.append))
+
+    assert (events[-1].stage, events[-1].status) == ("expansion", "failed")
