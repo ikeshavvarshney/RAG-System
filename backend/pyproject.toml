@@ -19,6 +19,7 @@ dependencies = [
     "langchain-google-genai>=2.0",
     "chromadb>=1.0",
     "rank-bm25>=0.2",
+    "sentence-transformers>=3.0",
 ]
 
 [project.optional-dependencies]

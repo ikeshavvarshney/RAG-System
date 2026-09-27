@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Dense share of the RRF score, the RQ1 ablation variable. 1.0 is dense-only, 0.0 sparse-only.
     FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)
     RRF_K: int = Field(default=60, ge=1)
+    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANK_CANDIDATES: int = Field(default=30, ge=1)
+    RERANK_TOP_K: int = Field(default=8, ge=1)
+    CONTEXT_TOKEN_BUDGET: int = Field(default=3000, ge=1)
 
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)
