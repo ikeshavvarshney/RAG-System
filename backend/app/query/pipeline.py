@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -10,9 +10,11 @@ from app.core.config import settings
 from app.ingestion.indexer import get_keyword_index, get_vector_store
 from app.query import cache
 from app.query.expansion import expand_query
+from app.query.fusion import Candidate, fuse
 from app.query.greeting import classify_greeting, match_greeting
 from app.query.guardrails.input import check_deterministic, check_llm
 from app.query.history import record_turn, resolve_question
+from app.query.rerank import RankedContext, rerank_and_consolidate
 from app.query.retrieval import RetrievalResult, retrieve
 from app.shared.keyword_index import KeywordIndex
 from app.shared.schemas.citation import Citation
@@ -22,7 +24,16 @@ from app.shared.vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 Stage = Literal[
-    "guardrail", "greeting", "guardrail_llm", "greeting_llm", "history", "cache", "expansion", "retrieval"
+    "guardrail",
+    "greeting",
+    "guardrail_llm",
+    "greeting_llm",
+    "history",
+    "cache",
+    "expansion",
+    "retrieval",
+    "fusion",
+    "rerank",
 ]
 
 
@@ -40,12 +51,24 @@ class QueryResult:
     resolved_question: str
     retrieval: RetrievalResult = field(default_factory=RetrievalResult)
     expanded_queries: list[str] = field(default_factory=list)
+    fused: list[Candidate] = field(default_factory=list)
+    context: list[Candidate] = field(default_factory=list)
+    reranked: bool = False
     response: str | None = None
     answer: str | None = None
     citations: list[Citation] = field(default_factory=list)
 
 
 EventCallback = Callable[[StageEvent], None]
+StageContext = Callable[[Stage], AbstractContextManager[None]]
+
+
+@dataclass
+class RankedRetrieval:
+    expanded_queries: list[str]
+    retrieval: RetrievalResult
+    fused: list[Candidate]
+    context: RankedContext
 
 
 def _elapsed_ms(began: float) -> float:
@@ -66,6 +89,36 @@ async def _lookup_cache(resolved_question: str, scope: str) -> cache.CacheHit | 
     except Exception:  # noqa: BLE001 - a broken cache must not block retrieval
         logger.warning("answer cache lookup failed; continuing to retrieval", exc_info=True)
         return None
+
+
+async def retrieve_and_rank(
+    question: str,
+    stage: StageContext,
+    *,
+    corpus_scope: str,
+    vector_store: VectorStore,
+    keyword_index: KeywordIndex,
+) -> RankedRetrieval:
+    with stage("expansion"):
+        queries = await expand_query(question)
+
+    with stage("retrieval"):
+        retrieval = await retrieve(
+            question,
+            queries,
+            vector_store=vector_store,
+            keyword_index=keyword_index,
+            corpus_scope=corpus_scope,
+            top_k=settings.RETRIEVAL_TOP_K,
+        )
+
+    with stage("fusion"):
+        fused = fuse(retrieval, dense_weight=settings.FUSION_DENSE_WEIGHT, k=settings.RRF_K)
+
+    with stage("rerank"):
+        context = await asyncio.to_thread(rerank_and_consolidate, question, fused)
+
+    return RankedRetrieval(queries, retrieval, fused, context)
 
 
 async def run_query(
@@ -125,19 +178,21 @@ async def run_query(
             citations=hit.citations,
         )
 
-    with stage("expansion"):
-        queries = await expand_query(resolved_question)
-
-    with stage("retrieval"):
-        retrieval = await retrieve(
-            resolved_question,
-            queries,
-            vector_store=vector_store,
-            keyword_index=keyword_index,
-            corpus_scope=corpus_scope,
-            top_k=settings.RETRIEVAL_TOP_K,
-        )
+    ranked = await retrieve_and_rank(
+        resolved_question,
+        stage,
+        corpus_scope=corpus_scope,
+        vector_store=vector_store,
+        keyword_index=keyword_index,
+    )
     record_turn(session_id, sanitized, resolved_question)
     return QueryResult(
-        "retrieved", question, resolved_question, retrieval=retrieval, expanded_queries=queries
+        "retrieved",
+        question,
+        resolved_question,
+        retrieval=ranked.retrieval,
+        expanded_queries=ranked.expanded_queries,
+        fused=ranked.fused,
+        context=ranked.context.passages,
+        reranked=ranked.context.reranked,
     )

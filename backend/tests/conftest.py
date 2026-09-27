@@ -33,6 +33,20 @@ def _stub_vector(text: str, dim: int = 8) -> list[float]:
     return [(seed + i) / 100.0 for i in range(dim)]
 
 
+class _LengthCrossEncoder:
+    """Stand-in for the real cross-encoder: scores shorter passages higher."""
+
+    def predict(self, pairs):
+        return [-float(len(text)) for _, text in pairs]
+
+
+@pytest.fixture(autouse=True)
+def fake_cross_encoder(monkeypatch):
+    from app.query import rerank
+
+    monkeypatch.setattr(rerank, "_model", _LengthCrossEncoder())
+
+
 @pytest.fixture(autouse=True)
 def isolate_index_stores(tmp_path, monkeypatch):
     """Keep every test off the real Gemini API and the real ./data/chroma."""

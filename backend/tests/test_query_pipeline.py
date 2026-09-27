@@ -32,6 +32,7 @@ HISTORY = [("history", "started"), ("history", "completed")]
 CACHE = [("cache", "started"), ("cache", "completed")]
 EXPANSION = [("expansion", "started"), ("expansion", "completed")]
 RETRIEVAL = [("retrieval", "started"), ("retrieval", "completed")]
+RANKING = [("fusion", "started"), ("fusion", "completed"), ("rerank", "started"), ("rerank", "completed")]
 
 
 def _chunk(chunk_id: str, text: str, scope: str = "persistent") -> Chunk:
@@ -128,9 +129,33 @@ def test_full_path_emits_every_stage_in_order(fake_llm, corpus):
 
     result, events = _run("how did revenue grow this quarter?")
 
-    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + EXPANSION + RETRIEVAL
+    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + EXPANSION + RETRIEVAL + RANKING
     assert result.terminated_at == "retrieved"
     assert result.expanded_queries == ["how did revenue grow this quarter?", "sales growth"]
+
+
+def test_retrieved_hits_are_fused_and_reranked_into_context(fake_llm, corpus):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+
+    result, _ = _run("how did revenue grow this quarter?")
+
+    assert {c.chunk_id for c in result.fused} == {"c1", "c2"}
+    assert len({c.chunk_id for c in result.fused}) == len(result.fused)
+    assert result.reranked
+    assert result.context and {c.chunk_id for c in result.context} <= {"c1", "c2"}
+    assert all(c.metadata["source_doc"] for c in result.context)
+
+
+def test_rerank_uses_the_configured_fusion_weight(fake_llm, corpus, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+    monkeypatch.setattr(settings, "FUSION_DENSE_WEIGHT", 0.0)
+
+    result, _ = _run("how did revenue grow this quarter?")
+
+    assert all(p.retriever == "keyword" or c.score > 0 for c in result.fused for p in c.provenance)
+    assert {c.chunk_id for c in result.fused} == {h.chunk_id for h in result.retrieval.keyword_hits}
 
 
 def test_first_turn_makes_no_history_llm_call(fake_llm, corpus):
@@ -172,7 +197,7 @@ def test_expansion_failure_still_retrieves_with_original_query(fake_llm, corpus)
 
     assert result.terminated_at == "retrieved"
     assert result.expanded_queries == ["how did revenue grow?"]
-    assert events[-1] == ("retrieval", "completed")
+    assert ("retrieval", "completed") in events
 
 
 def test_guardrail_llm_failure_fails_open_into_retrieval(fake_llm, corpus):
@@ -211,7 +236,7 @@ def test_follow_up_is_answered_from_the_resolved_question(fake_llm, corpus, monk
     assert {h.query for h in result.retrieval.vector_hits} == {result.resolved_question}
     assert {h.chunk_id for h in result.retrieval.keyword_hits} == {"c1"}
     assert "query_history" in _stages(fake_llm)
-    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + EXPANSION + RETRIEVAL
+    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + EXPANSION + RETRIEVAL + RANKING
 
 
 def test_unrelated_question_after_a_turn_is_not_rewritten(fake_llm, corpus):
@@ -290,7 +315,7 @@ def test_cache_failure_falls_through_to_retrieval(fake_llm, corpus, monkeypatch)
     result, events = _run("how did revenue grow?")
 
     assert result.terminated_at == "retrieved"
-    assert events[-2:] == RETRIEVAL
+    assert events[-6:] == RETRIEVAL + RANKING
 
 
 def test_turn_is_recorded_after_retrieval(fake_llm, corpus):
