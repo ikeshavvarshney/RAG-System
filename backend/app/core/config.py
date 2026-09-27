@@ -58,7 +58,9 @@ class Settings(BaseSettings):
     FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)
     RRF_K: int = Field(default=60, ge=1)
     RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    RERANK_CANDIDATES: int = Field(default=30, ge=1)
+    # Measured on a 2-core CPU with 500-token chunks: 30 at 512 tokens took ~4s, 20 at 256 ~1.3s.
+    RERANK_CANDIDATES: int = Field(default=20, ge=1)
+    RERANK_MAX_LENGTH: int = Field(default=256, ge=32)
     RERANK_TOP_K: int = Field(default=8, ge=1)
     CONTEXT_TOKEN_BUDGET: int = Field(default=3000, ge=1)
 

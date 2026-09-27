@@ -32,7 +32,9 @@ def _load_model() -> Any:
         if _model is None:
             from sentence_transformers import CrossEncoder
 
-            _model = CrossEncoder(settings.RERANK_MODEL, device="cpu")
+            _model = CrossEncoder(
+                settings.RERANK_MODEL, device="cpu", max_length=settings.RERANK_MAX_LENGTH
+            )
     return _model
 
 
