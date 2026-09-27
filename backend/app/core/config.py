@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Real pairs: paraphrases 0.976-0.989, same-topic-different-question 0.93, unrelated 0.81.
     CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.96, ge=0.0, le=1.0)
 
+    #--- Fusion and reranking (Week 5) ---
+    # Dense share of the RRF score, the RQ1 ablation variable. 1.0 is dense-only, 0.0 sparse-only.
+    FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)
+    RRF_K: int = Field(default=60, ge=1)
+
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)
     # "paddle-structure"  PP-StructureV3: layout + table structure recovery
