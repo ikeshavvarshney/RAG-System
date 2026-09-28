@@ -7,9 +7,11 @@ import pytest
 from app.core.config import settings
 from app.ingestion.indexer import index_chunks
 from app.query import cache, history, retrieval
+from app.query.fusion import Candidate, Contribution
 from app.shared import session_store
 from app.shared.session_store import get_session_stores, scope_for
-from app.query.pipeline import QueryResult, StageEvent, run_query
+from app.query.pipeline import QueryResult, StageEvent, _rerank_pool, run_query
+from app.query.web_search import WebSearchResult
 from app.shared.schemas.chunk import Chunk
 from app.shared.schemas.citation import CorpusCitation
 
@@ -32,7 +34,11 @@ HISTORY = [("history", "started"), ("history", "completed")]
 CACHE = [("cache", "started"), ("cache", "completed")]
 EXPANSION = [("expansion", "started"), ("expansion", "completed")]
 RETRIEVAL = [("retrieval", "started"), ("retrieval", "completed")]
-RANKING = [("fusion", "started"), ("fusion", "completed"), ("rerank", "started"), ("rerank", "completed")]
+FUSION = [("fusion", "started"), ("fusion", "completed")]
+SUFFICIENCY = [("sufficiency", "started"), ("sufficiency", "completed")]
+WEB_SEARCH = [("web_search", "started"), ("web_search", "completed")]
+RERANK = [("rerank", "started"), ("rerank", "completed")]
+RANKING = FUSION + SUFFICIENCY + RERANK
 
 
 def _chunk(chunk_id: str, text: str, scope: str = "persistent") -> Chunk:
@@ -315,7 +321,7 @@ def test_cache_failure_falls_through_to_retrieval(fake_llm, corpus, monkeypatch)
     result, events = _run("how did revenue grow?")
 
     assert result.terminated_at == "retrieved"
-    assert events[-6:] == RETRIEVAL + RANKING
+    assert events[-len(RETRIEVAL + RANKING):] == RETRIEVAL + RANKING
 
 
 def test_turn_is_recorded_after_retrieval(fake_llm, corpus):
@@ -446,3 +452,148 @@ def test_a_raising_stage_emits_failed_and_propagates(fake_llm, corpus, monkeypat
         asyncio.run(run_query("how did revenue grow?", SESSION, on_event=events.append))
 
     assert (events[-1].stage, events[-1].status) == ("expansion", "failed")
+
+
+def _web(n: int) -> list[Candidate]:
+    return [
+        Candidate(
+            f"web:{i}",
+            f"web snippet {i}",
+            {"source_type": "web", "source_url": f"https://example.com/{i}", "title": f"Page {i}"},
+            0.9,
+            source="web",
+            provenance=[Contribution("web", i, "q", 0.9)],
+        )
+        for i in range(1, n + 1)
+    ]
+
+
+@pytest.fixture
+def insufficient(monkeypatch):
+    """Thresholds no similarity can reach, so the score gate rejects without an LLM call."""
+    monkeypatch.setattr(settings, "SUFFICIENCY_HIGH_THRESHOLD", 2.0)
+    monkeypatch.setattr(settings, "SUFFICIENCY_LOW_THRESHOLD", 2.0)
+
+
+def test_sufficient_retrieval_skips_web_search(fake_llm, corpus, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+    searched: list[str] = []
+
+    async def fake_search(question):
+        searched.append(question)
+        return WebSearchResult(_web(2), "ok")
+
+    monkeypatch.setattr("app.query.pipeline.search_web", fake_search)
+
+    result, events = _run("how did revenue grow this quarter?")
+
+    assert result.sufficiency is not None and result.sufficiency.sufficient
+    assert result.web_search is None and searched == []
+    assert events[-len(RANKING):] == RANKING
+
+
+def test_insufficient_retrieval_adds_web_results_to_the_context(fake_llm, corpus, insufficient, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+    searched: list[str] = []
+
+    async def fake_search(question):
+        searched.append(question)
+        return WebSearchResult(_web(2), "ok")
+
+    monkeypatch.setattr("app.query.pipeline.search_web", fake_search)
+
+    result, events = _run("how did revenue grow this quarter?")
+
+    assert result.sufficiency is not None and not result.sufficiency.sufficient
+    assert searched == [result.resolved_question]
+    assert result.web_search is not None and result.web_search.status == "ok"
+    assert {"web:1", "web:2"} <= {c.chunk_id for c in result.context}
+    assert {"c1", "c2"} <= {c.chunk_id for c in result.context}
+    assert all(c.source == "web" for c in result.context if c.chunk_id.startswith("web:"))
+    assert "web:1" not in {c.chunk_id for c in result.fused}
+    assert events[-len(FUSION + SUFFICIENCY + WEB_SEARCH + RERANK):] == FUSION + SUFFICIENCY + WEB_SEARCH + RERANK
+
+
+def test_web_search_failure_degrades_to_corpus_only(fake_llm, corpus, insufficient):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+
+    result, events = _run("how did revenue grow this quarter?")
+
+    assert result.terminated_at == "retrieved"
+    assert result.web_search is not None
+    assert (result.web_search.status, result.web_search.failure) == ("failed", "no_keys")
+    assert result.context and {c.chunk_id for c in result.context} <= {"c1", "c2"}
+    assert ("rerank", "completed") in events
+
+
+def test_insufficient_grey_zone_without_a_verdict_still_searches_the_web(fake_llm, corpus, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+    monkeypatch.setattr(settings, "SUFFICIENCY_HIGH_THRESHOLD", 2.0)
+    monkeypatch.setattr(settings, "SUFFICIENCY_LOW_THRESHOLD", 0.0)
+    monkeypatch.setattr(settings, "SUFFICIENCY_LLM_ENABLED", False)
+
+    result, events = _run("how did revenue grow this quarter?")
+
+    assert result.sufficiency is not None and result.sufficiency.method == "score"
+    assert ("web_search", "completed") in events
+
+
+def test_cache_hit_never_reaches_sufficiency_or_web_search(fake_llm, corpus):
+    question = "what was the cached funding request?"
+    _seed_cache(question)
+    fake_llm.replies["query_guardrail"] = SAFE
+
+    result, events = _run(question)
+
+    assert result.sufficiency is None and result.web_search is None
+    assert not {"sufficiency", "web_search"} & {stage for stage, _ in events}
+
+
+def test_rerank_pool_reserves_slots_for_web_results(monkeypatch):
+    monkeypatch.setattr(settings, "RERANK_CANDIDATES", 6)
+    monkeypatch.setattr(settings, "WEB_MAX_IN_POOL", 2)
+    fused = [Candidate(f"c{i}", "t", {}, 1.0) for i in range(10)]
+
+    pool = _rerank_pool(fused, _web(5))
+
+    assert [c.chunk_id for c in pool] == ["web:1", "web:2", "c0", "c1", "c2", "c3"]
+
+
+def test_rerank_pool_without_web_is_the_fused_shortlist(monkeypatch):
+    monkeypatch.setattr(settings, "RERANK_CANDIDATES", 3)
+    fused = [Candidate(f"c{i}", "t", {}, 1.0) for i in range(5)]
+
+    assert [c.chunk_id for c in _rerank_pool(fused, [])] == ["c0", "c1", "c2"]
+
+
+def test_rerank_pool_never_exceeds_the_shortlist_size(monkeypatch):
+    monkeypatch.setattr(settings, "RERANK_CANDIDATES", 3)
+    monkeypatch.setattr(settings, "WEB_MAX_IN_POOL", 5)
+
+    pool = _rerank_pool([Candidate("c0", "t", {}, 1.0)], _web(5))
+
+    assert [c.chunk_id for c in pool] == ["web:1", "web:2", "web:3"]
+
+
+def test_web_results_survive_a_failed_rerank(fake_llm, corpus, insufficient, monkeypatch):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+
+    async def fake_search(question):
+        return WebSearchResult(_web(2), "ok")
+
+    class Broken:
+        def predict(self, pairs):
+            raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr("app.query.pipeline.search_web", fake_search)
+    monkeypatch.setattr("app.query.rerank._model", Broken())
+
+    result, _ = _run("how did revenue grow this quarter?")
+
+    assert not result.reranked
+    assert [c.chunk_id for c in result.context[:2]] == ["web:1", "web:2"]

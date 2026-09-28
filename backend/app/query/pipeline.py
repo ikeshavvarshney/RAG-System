@@ -16,6 +16,8 @@ from app.query.guardrails.input import check_deterministic, check_llm
 from app.query.history import record_turn, resolve_question
 from app.query.rerank import RankedContext, rerank_and_consolidate
 from app.query.retrieval import RetrievalResult, retrieve
+from app.query.sufficiency import SufficiencyResult, assess
+from app.query.web_search import WebSearchResult, search_web
 from app.shared.keyword_index import KeywordIndex
 from app.shared.schemas.citation import Citation
 from app.shared.session_store import PERSISTENT_SCOPE, find_session_stores, scope_for
@@ -33,6 +35,8 @@ Stage = Literal[
     "expansion",
     "retrieval",
     "fusion",
+    "sufficiency",
+    "web_search",
     "rerank",
 ]
 
@@ -52,6 +56,8 @@ class QueryResult:
     retrieval: RetrievalResult = field(default_factory=RetrievalResult)
     expanded_queries: list[str] = field(default_factory=list)
     fused: list[Candidate] = field(default_factory=list)
+    sufficiency: SufficiencyResult | None = None
+    web_search: WebSearchResult | None = None
     context: list[Candidate] = field(default_factory=list)
     reranked: bool = False
     response: str | None = None
@@ -68,6 +74,8 @@ class RankedRetrieval:
     expanded_queries: list[str]
     retrieval: RetrievalResult
     fused: list[Candidate]
+    sufficiency: SufficiencyResult
+    web_search: WebSearchResult | None
     context: RankedContext
 
 
@@ -89,6 +97,15 @@ async def _lookup_cache(resolved_question: str, scope: str) -> cache.CacheHit | 
     except Exception:  # noqa: BLE001 - a broken cache must not block retrieval
         logger.warning("answer cache lookup failed; continuing to retrieval", exc_info=True)
         return None
+
+
+def _rerank_pool(fused: list[Candidate], web: list[Candidate]) -> list[Candidate]:
+    """Web results take reserved slots so a full corpus shortlist cannot crowd them out.
+
+    They lead the pool: if reranking fails the order is kept, and the corpus was already judged insufficient.
+    """
+    web = web[: min(settings.WEB_MAX_IN_POOL, settings.RERANK_CANDIDATES)]
+    return web + fused[: settings.RERANK_CANDIDATES - len(web)]
 
 
 async def retrieve_and_rank(
@@ -115,10 +132,19 @@ async def retrieve_and_rank(
     with stage("fusion"):
         fused = fuse(retrieval, dense_weight=settings.FUSION_DENSE_WEIGHT, k=settings.RRF_K)
 
-    with stage("rerank"):
-        context = await asyncio.to_thread(rerank_and_consolidate, question, fused)
+    with stage("sufficiency"):
+        sufficiency = await assess(question, fused)
 
-    return RankedRetrieval(queries, retrieval, fused, context)
+    web_search: WebSearchResult | None = None
+    if not sufficiency.sufficient:
+        with stage("web_search"):
+            web_search = await search_web(question)
+
+    with stage("rerank"):
+        pool = _rerank_pool(fused, web_search.candidates if web_search else [])
+        context = await asyncio.to_thread(rerank_and_consolidate, question, pool)
+
+    return RankedRetrieval(queries, retrieval, fused, sufficiency, web_search, context)
 
 
 async def run_query(
@@ -193,6 +219,8 @@ async def run_query(
         retrieval=ranked.retrieval,
         expanded_queries=ranked.expanded_queries,
         fused=ranked.fused,
+        sufficiency=ranked.sufficiency,
+        web_search=ranked.web_search,
         context=ranked.context.passages,
         reranked=ranked.context.reranked,
     )
