@@ -98,41 +98,42 @@ def test_llm_sees_only_top_k_passages_truncated(fake_llm, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "reply",
+    "reply, kind",
     [
-        RuntimeError("quota"),
-        "not json at all",
-        '{"sufficient": "yes", "reason": "x"}',
-        '{"reason": "missing verdict"}',
-        '["sufficient"]',
-        "",
+        (RuntimeError("quota"), "llm_error"),
+        ("not json at all", "bad_json"),
+        ('{"sufficient": "yes", "reason": "x"}', "bad_json"),
+        ('{"reason": "missing verdict"}', "bad_json"),
+        ('["sufficient"]', "bad_json"),
+        ("", "bad_json"),
     ],
 )
-def test_llm_failure_or_bad_json_falls_back(fake_llm, reply):
+def test_llm_failure_or_bad_json_falls_back_insufficient_and_names_the_failure(fake_llm, reply, kind):
     fake_llm.replies[STAGE] = reply
 
     result = _assess([_candidate("a", dense=0.85)])
 
     assert result.method == "fallback"
-    assert result.sufficient is True  # above the 0.8 midpoint of 0.7 and 0.9
+    assert result.sufficient is False
+    assert result.reason.startswith(f"{kind}:")
 
 
-def test_fallback_leans_insufficient_below_the_midpoint(fake_llm):
+def test_fallback_leans_insufficient_even_near_the_high_threshold(fake_llm):
     fake_llm.replies[STAGE] = RuntimeError("down")
 
-    result = _assess([_candidate("a", dense=0.75)])
+    result = _assess([_candidate("a", dense=0.89)])
 
     assert result.method == "fallback" and not result.sufficient
 
 
-def test_disabled_llm_stage_follows_the_score_lean(fake_llm, monkeypatch):
+def test_disabled_llm_stage_leans_insufficient_in_the_grey_zone(fake_llm, monkeypatch):
     monkeypatch.setattr(settings, "SUFFICIENCY_LLM_ENABLED", False)
 
-    above = _assess([_candidate("a", dense=0.85)])
-    below = _assess([_candidate("a", dense=0.75)])
+    grey = _assess([_candidate("a", dense=0.85)])
+    high = _assess([_candidate("a", dense=0.95)])
 
-    assert (above.sufficient, above.method) == (True, "score")
-    assert (below.sufficient, below.method) == (False, "score")
+    assert (grey.sufficient, grey.method) == (False, "score")
+    assert (high.sufficient, high.method) == (True, "score")
     assert fake_llm.calls == []
 
 

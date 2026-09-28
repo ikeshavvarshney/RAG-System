@@ -30,6 +30,9 @@ class UsageTracker:
             )
         )
 
+    def request_count(self, stage: str | None = None) -> int:
+        return sum(1 for entry in self._entries if stage is None or entry.stage == stage)
+
     def total_tokens(self) -> int:
         return sum(entry.total_tokens for entry in self._entries)
 

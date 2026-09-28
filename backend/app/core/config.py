@@ -66,14 +66,28 @@ class Settings(BaseSettings):
 
     #--- Sufficiency (Week 5) ---
     # Gated on the best dense cosine similarity, since RRF scores carry no absolute relevance and BM25 is unbounded.
-    # Provisional: a 24-question probe of the real corpus put in-corpus at 0.85-0.90 and out-of-corpus at 0.76-0.89.
-    SUFFICIENCY_HIGH_THRESHOLD: float = Field(default=0.89, ge=0.0, le=1.0)
-    SUFFICIENCY_LOW_THRESHOLD: float = Field(default=0.80, ge=0.0, le=1.0)
+    # Calibrated on 24 real-corpus questions: in-corpus 0.847-0.904, out-of-corpus 0.758-0.888 (adjacent topics reach 0.89).
+    # A false auto-pass skips web search on a miss, which costs more than an extra LLM call, so HIGH sits above every
+    # out-of-corpus score seen; LOW stays under the weakest in-corpus hit. A grey zone with no LLM verdict leans insufficient.
+    SUFFICIENCY_HIGH_THRESHOLD: float = Field(default=0.90, ge=0.0, le=1.0)
+    SUFFICIENCY_LOW_THRESHOLD: float = Field(default=0.82, ge=0.0, le=1.0)
     SUFFICIENCY_LLM_ENABLED: bool = True
     SUFFICIENCY_LLM_MODEL: str = "gemini-3.5-flash-lite"
     SUFFICIENCY_LLM_TOP_K: int = Field(default=5, ge=1)
     SUFFICIENCY_LLM_PASSAGE_CHARS: int = Field(default=700, ge=50)
     SUFFICIENCY_LLM_MAX_OUTPUT_TOKENS: int = Field(default=200, ge=16)
+
+    #--- Web search fallback (Week 5) ---
+    WEB_SEARCH_MAX_RESULTS: int = Field(default=5, ge=1, le=20)
+    WEB_SEARCH_TIMEOUT_SEC: float = Field(default=10.0, gt=0)
+    WEB_SEARCH_DEPTH: Literal["basic", "advanced", "fast", "ultra-fast"] = "basic"
+    WEB_SEARCH_QUERY_MAX_CHARS: int = Field(default=400, ge=20)
+    WEB_SEARCH_MAX_RETRIES: int = Field(default=2, ge=0)
+    WEB_SEARCH_BACKOFF_SEC: float = Field(default=0.5, ge=0)
+    # A key over its plan limit stays out this long before being probed again.
+    WEB_SEARCH_EXHAUSTED_BLOCK_SEC: int = Field(default=3600, ge=1)
+    # Web results allowed into the rerank pool: fused[:RERANK_CANDIDATES - n_web] + web[:WEB_MAX_IN_POOL].
+    WEB_MAX_IN_POOL: int = Field(default=5, ge=0)
 
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)

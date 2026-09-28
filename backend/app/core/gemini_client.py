@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-from app.core.key_rotation import gemini_keys
+from app.core.key_rotation import call_with_key_rotation, gemini_keys
 from app.core.usage import UsageTracker
 
 logger = logging.getLogger(__name__)
@@ -108,35 +108,18 @@ class GeminiClient:
     def _call_with_key_rotation(
         self, operation, *, scope: str = "", max_retries: int | None = None
     ):
-        """Run ``operation(api_key)``; on a rate-limit error rotate to the next key and retry with exponential backoff."""
-        retries = self.max_retries if max_retries is None else max_retries
-        attempts = retries + 1
-        last_exc: BaseException | None = None
-
-        attempt = 0
-        while attempt < attempts:
-            api_key = gemini_keys.next(scope)
-            try:
-                return operation(api_key)
-            except Exception as exc:
-                if not _is_rate_limit_error(exc):
-                    raise
-                last_exc = exc
-                if _is_daily_quota_error(exc):
-                    gemini_keys.block(api_key, scope, _DAILY_QUOTA_BLOCK_SEC)
-                    logger.warning("Gemini daily quota exhausted for a key; skipping it")
-                    continue
-                logger.warning(
-                    "Gemini rate-limited (attempt %d/%d); rotating key and retrying",
-                    attempt + 1,
-                    attempts,
-                )
-                if attempt < attempts - 1 and self.backoff_base > 0:
-                    time.sleep(self.backoff_base * (2**attempt))
-                attempt += 1
-
-        assert last_exc is not None  # loop ran at least once
-        raise last_exc
+        return call_with_key_rotation(
+            operation,
+            gemini_keys,
+            scope=scope,
+            retries=self.max_retries if max_retries is None else max_retries,
+            backoff_base=self.backoff_base,
+            is_rate_limited=_is_rate_limit_error,
+            is_quota_exhausted=_is_daily_quota_error,
+            exhausted_block_seconds=_DAILY_QUOTA_BLOCK_SEC,
+            label="Gemini",
+            log=logger,
+        )
 
     def generate(
         self,

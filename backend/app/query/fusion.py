@@ -7,7 +7,7 @@ from app.query.retrieval import RetrievalHit, RetrievalResult
 
 @dataclass(frozen=True)
 class Contribution:
-    retriever: Literal["vector", "keyword"]
+    retriever: Literal["vector", "keyword", "web"]
     rank: int
     query: str | None = None
     score: float | None = None

@@ -84,7 +84,7 @@ async def _run_question(item: dict) -> dict:
     fused = fuse(retrieval, dense_weight=settings.FUSION_DENSE_WEIGHT, k=settings.RRF_K)
     result = await assess(question, fused)
     if result.method == "fallback":
-        raise Degraded("sufficiency LLM verdict failed (likely quota or bad output)")
+        raise Degraded(f"sufficiency LLM verdict failed ({result.reason})")
 
     original = [
         p.score for c in fused for p in c.provenance
@@ -149,12 +149,28 @@ def _spread(values: list[float]) -> str:
     return f"min {min(values):.3f} / median {statistics.median(values):.3f} / max {max(values):.3f}"
 
 
+def _project(row: dict, low: float, high: float) -> tuple[bool | None, str]:
+    """The verdict this row would get under the given thresholds, from evidence already recorded."""
+    score = float(row["top_dense"])
+    if score >= high:
+        return True, "score"
+    if score < low:
+        return False, "score"
+    if row["method"] == "llm":
+        return row["verdict"] == "True", "llm (recorded)"
+    return None, "pending LLM"
+
+
 def build_summary(rows: list[dict], margin: float) -> tuple[str, str]:
     scored = [r for r in rows if r["top_dense"]]
     inside = [float(r["top_dense"]) for r in scored if r["label"] == "in_corpus"]
     outside = [float(r["top_dense"]) for r in scored if r["label"] != "in_corpus"]
-    verdicts = [r for r in rows if r["matched"] in ("True", "False")]
-    matched = sum(r["matched"] == "True" for r in verdicts)
+    low_now, high_now = settings.SUFFICIENCY_LOW_THRESHOLD, settings.SUFFICIENCY_HIGH_THRESHOLD
+    projected = {r["id"]: _project(r, low_now, high_now) for r in scored}
+    decided = [r for r in scored if projected[r["id"]][0] is not None]
+    matched = sum(projected[r["id"]][0] == (r["label"] == "in_corpus") for r in decided)
+    pending = [r["id"] for r in scored if projected[r["id"]][0] is None]
+    recorded = [r for r in rows if r["matched"] in ("True", "False")]
     by_method: dict[str, int] = {}
     for r in rows:
         by_method[r["method"]] = by_method.get(r["method"], 0) + 1
@@ -163,25 +179,30 @@ def build_summary(rows: list[dict], margin: float) -> tuple[str, str]:
         "# Sufficiency calibration",
         "",
         f"{len(rows)} questions ({len(inside)} in-corpus, {len(outside)} out-of-corpus). "
-        f"Verdicts matching the expected label with the current config: **{matched}/{len(verdicts)}**. "
-        f"Methods: {', '.join(f'{k}={v}' for k, v in sorted(by_method.items()))}.",
+        f"As recorded when run: **{sum(r['matched'] == 'True' for r in recorded)}/{len(recorded)}** matched "
+        f"({', '.join(f'{k}={v}' for k, v in sorted(by_method.items()))}).",
+        "",
+        f"Projected at the current thresholds (low={low_now}, high={high_now}), reusing recorded LLM verdicts: "
+        f"**{matched}/{len(decided)}** matched, {len(pending)} pending an LLM call"
+        + (f" ({', '.join(pending)})." if pending else "."),
         "",
         "## Top dense similarity (best over all expanded queries)",
         "",
         f"- in-corpus: {_spread(inside)}",
         f"- out-of-corpus: {_spread(outside)}",
-        f"- current config: low={settings.SUFFICIENCY_LOW_THRESHOLD}, high={settings.SUFFICIENCY_HIGH_THRESHOLD}",
         "",
         "## Per question",
         "",
-        "| id | label | top dense | original only | verdict | method | match | reason |",
+        "| id | label | top dense | original only | recorded | at current thresholds | match | reason |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         reason = r["reason"].replace("|", "/")[:110]
+        verdict, path = projected.get(r["id"], (None, "n/a"))
+        outcome = "pending" if verdict is None else ("yes" if verdict == (r["label"] == "in_corpus") else "NO")
         lines.append(
-            f"| {r['id']} | {r['label']} | {r['top_dense']} | {r['top_dense_original']} | {r['verdict']} | "
-            f"{r['method']} | {'yes' if r['matched'] == 'True' else 'NO'} | {reason} |"
+            f"| {r['id']} | {r['label']} | {r['top_dense']} | {r['top_dense_original']} | "
+            f"{r['verdict']} ({r['method']}) | {verdict} ({path}) | {outcome} | {reason} |"
         )
 
     suggestion = "Not enough data: need at least one scored question of each label."
@@ -207,10 +228,11 @@ def build_summary(rows: list[dict], margin: float) -> tuple[str, str]:
         lines += ["", f"Suggested: `{suggestion}`", "",
                   "Sample sizes are small: treat the margin as a floor, not a guarantee."]
 
-    misses = [r for r in rows if r["matched"] == "False"]
+    misses = [r for r in decided if projected[r["id"]][0] != (r["label"] == "in_corpus")]
     if misses:
-        lines += ["", "## Mismatches", ""] + [
-            f"- {r['id']} ({r['label']}, top dense {r['top_dense']}, {r['method']}): {r['question']}" for r in misses
+        lines += ["", "## Mismatches at the current thresholds", ""] + [
+            f"- {r['id']} ({r['label']}, top dense {r['top_dense']}, {projected[r['id']][1]}): {r['question']}"
+            for r in misses
         ]
     not_found = [r for r in rows if r["expected_chunk_found"] == "False"]
     if not_found:

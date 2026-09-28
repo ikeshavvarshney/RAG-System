@@ -23,3 +23,14 @@ def test_multiple_entries_same_stage_accumulate():
 
     assert tracker.total_tokens() == 20
     assert tracker.by_stage() == {"ingest": 20}
+
+
+def test_request_count_counts_entries_optionally_by_stage():
+    tracker = UsageTracker()
+    tracker.record("web_search", "tavily", 0, 0)
+    tracker.record("web_search", "tavily", 0, 0)
+    tracker.record("query", "m", 5, 5)
+
+    assert tracker.request_count() == 3
+    assert tracker.request_count("web_search") == 2
+    assert tracker.request_count("missing") == 0

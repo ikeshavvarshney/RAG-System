@@ -56,12 +56,10 @@ def compute_scores(candidates: list[Candidate]) -> SufficiencyScores:
     )
 
 
-def _lean(scores: SufficiencyScores, candidates: list[Candidate]) -> bool:
-    if scores.top_dense is None:
-        # A zero dense weight leaves no dense signal; keyword evidence is all there is.
-        return bool(candidates)
-    midpoint = (settings.SUFFICIENCY_HIGH_THRESHOLD + settings.SUFFICIENCY_LOW_THRESHOLD) / 2
-    return scores.top_dense >= midpoint
+class _VerdictFailure(Exception):
+    def __init__(self, kind: Literal["llm_error", "bad_json"]):
+        super().__init__(kind)
+        self.kind = kind
 
 
 def _render_passages(candidates: list[Candidate]) -> str:
@@ -70,16 +68,22 @@ def _render_passages(candidates: list[Candidate]) -> str:
     return "\n\n".join(f"[{i}] {' '.join(c.text.split())[:limit]}" for i, c in enumerate(top, start=1))
 
 
-async def _llm_verdict(question: str, candidates: list[Candidate]) -> tuple[bool, str] | None:
+async def _llm_verdict(question: str, candidates: list[Candidate]) -> tuple[bool, str]:
     prompt = _PROMPT.format(question=question, passages=_render_passages(candidates))
-    parsed = await llm.generate_json(
-        "query_sufficiency",
-        prompt,
-        settings.SUFFICIENCY_LLM_MAX_OUTPUT_TOKENS,
-        model=settings.SUFFICIENCY_LLM_MODEL,
-    )
+    try:
+        text = await llm.generate(
+            "query_sufficiency",
+            prompt,
+            settings.SUFFICIENCY_LLM_MAX_OUTPUT_TOKENS,
+            model=settings.SUFFICIENCY_LLM_MODEL,
+        )
+    except Exception as exc:  # noqa: BLE001 - the caller falls back to insufficient
+        logger.warning("sufficiency: LLM call failed", exc_info=True)
+        raise _VerdictFailure("llm_error") from exc
+    parsed = llm.parse_json(text)
     if not isinstance(parsed, dict) or not isinstance(parsed.get("sufficient"), bool):
-        return None
+        logger.warning("sufficiency: unparseable LLM output: %.200r", text)
+        raise _VerdictFailure("bad_json")
     reason = parsed.get("reason")
     return parsed["sufficient"], reason.strip() if isinstance(reason, str) else ""
 
@@ -97,14 +101,17 @@ async def _decide(
     if top is not None and top < low:
         return SufficiencyResult(False, f"top dense similarity {top:.3f} < {low}", "score", scores)
 
-    lean = _lean(scores, candidates)
+    # Without a verdict the grey zone leans insufficient: web search failing degrades to corpus-only,
+    # while a false pass would skip it on a miss.
     if not settings.SUFFICIENCY_LLM_ENABLED:
-        return SufficiencyResult(lean, "grey zone, LLM stage disabled; following the score lean", "score", scores)
-
-    verdict = await _llm_verdict(question, candidates)
-    if verdict is None:
-        return SufficiencyResult(lean, "grey zone, LLM verdict unavailable; following the score lean", "fallback", scores)
-    return SufficiencyResult(verdict[0], verdict[1], "llm", scores)
+        return SufficiencyResult(False, "grey zone, LLM stage disabled; leaning insufficient", "score", scores)
+    try:
+        sufficient, reason = await _llm_verdict(question, candidates)
+    except _VerdictFailure as failure:
+        return SufficiencyResult(
+            False, f"{failure.kind}: no LLM verdict in the grey zone; leaning insufficient", "fallback", scores
+        )
+    return SufficiencyResult(sufficient, reason, "llm", scores)
 
 
 async def assess(question: str, candidates: list[Candidate]) -> SufficiencyResult:

@@ -20,6 +20,15 @@ def clear_key_pool_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_web_search(monkeypatch):
+    """The module-level Tavily rotator is built from .env at import, so without this a test could hold a real key."""
+    from app.core.key_rotation import KeyRotator
+    from app.query import web_search
+
+    monkeypatch.setattr(web_search, "tavily_keys", KeyRotator(""))
+
+
+@pytest.fixture(autouse=True)
 def no_embed_pacing(monkeypatch):
     """Zero the embed-request pacing sleep so tests never actually wait on it."""
     from app.core import gemini_client
