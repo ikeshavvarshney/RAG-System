@@ -10,6 +10,7 @@ class Contribution:
     retriever: Literal["vector", "keyword"]
     rank: int
     query: str | None = None
+    score: float | None = None
 
 
 @dataclass
@@ -51,7 +52,7 @@ def fuse(retrieval: RetrievalResult, *, dense_weight: float, k: int) -> list[Can
             if candidate is None:
                 candidate = fused[hit.chunk_id] = Candidate(hit.chunk_id, hit.text, hit.metadata, 0.0)
             candidate.score += weight / (k + rank)
-            candidate.provenance.append(Contribution(hit.retriever, rank, hit.query))
+            candidate.provenance.append(Contribution(hit.retriever, rank, hit.query, hit.score))
 
     # A zero-weight channel still records provenance but must not surface chunks on its own.
     ranked = [c for c in fused.values() if c.score > 0.0]

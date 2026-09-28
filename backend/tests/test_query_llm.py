@@ -24,6 +24,18 @@ def test_generate_minimises_thinking_and_caps_output(monkeypatch):
     assert config.max_output_tokens == 123
 
 
+def test_generate_uses_an_explicit_model_when_given(monkeypatch):
+    client = MagicMock()
+    client.generate.return_value = "ok"
+    monkeypatch.setattr(llm, "_client", client)
+
+    asyncio.run(llm.generate("stage", "prompt", 5, model="other-model"))
+    asyncio.run(llm.generate_json("stage", "prompt", 5, model="json-model"))
+
+    models = [call.args[1] for call in client.generate.call_args_list]
+    assert models == ["other-model", "json-model"]
+
+
 def test_gemini_client_passes_config_to_the_sdk():
     config = types.GenerateContentConfig(max_output_tokens=7)
     with patch("app.core.gemini_client.genai.Client") as client_cls, patch(

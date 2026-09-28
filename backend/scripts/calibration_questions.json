@@ -1,0 +1,30 @@
+{
+  "description": "Sufficiency calibration set. in_corpus questions are answerable from expected_chunk_id; out_of_corpus questions are plausible but not covered by the indexed documents. Edit freely; ids must be unique.",
+  "questions": [
+    {"id": "ic-01", "label": "in_corpus", "question": "What share of private industry workers had access to paid vacation in 2012, and how did access differ between full-time and part-time workers?", "expected_chunk_id": "6f06b384-4710-4572-865d-77eeec3520b8"},
+    {"id": "ic-02", "label": "in_corpus", "question": "What is the projected 2025/26 U.S. domestic sugar production in the July 2025 sugar outlook?", "expected_chunk_id": "fe46880b-bc0b-4439-b434-c0165bec175a"},
+    {"id": "ic-03", "label": "in_corpus", "question": "What is the combined nameplate capacity of Nigeria's four state-owned refineries?", "expected_chunk_id": "ef54d75e-3e83-4f25-b98e-d5226b20e656"},
+    {"id": "ic-04", "label": "in_corpus", "question": "How much installed electricity generation capacity did Indonesia have in 2023?", "expected_chunk_id": "ed1d73d8-b230-4196-955c-98d7f6440583"},
+    {"id": "ic-05", "label": "in_corpus", "question": "Which country was the top source of Indonesia's petroleum product imports in 2024?", "expected_chunk_id": "ec898fb4-9e0c-4946-a241-dce0281e03e7"},
+    {"id": "ic-06", "label": "in_corpus", "question": "How many people did CBO estimate emigrated from the other-foreign-national category in fiscal year 2023?", "expected_chunk_id": "857cb34c-6a73-4854-bc2e-35e5c0a91626"},
+    {"id": "ic-07", "label": "in_corpus", "question": "Which Supreme Court decision prompted the August 2023 amendments to the definition of waters of the United States?", "expected_chunk_id": "1a521d96-cf07-4cfc-8798-c795b0c8318f"},
+    {"id": "ic-08", "label": "in_corpus", "question": "By how much did the share of graduates earning credit in any occupational CTE area decline between 1990 and 2009?", "expected_chunk_id": "d74c15fb-ec11-4c4f-933c-bd1a38772bd9"},
+    {"id": "ic-09", "label": "in_corpus", "question": "How many public-supply wells were sampled to assess groundwater quality in the surficial aquifer system?", "expected_chunk_id": "f1d1f31d-8d6b-4f95-84f5-cc56f64bdee1"},
+    {"id": "ic-10", "label": "in_corpus", "question": "When did Honduras and Nicaragua begin objecting to the Central American Common Market arrangement?", "expected_chunk_id": "9c0726b8-284b-4149-9089-570e2538760d"},
+    {"id": "ic-11", "label": "in_corpus", "question": "What percentage of traffic fatalities in Alabama in 2020 involved an alcohol-impaired driver?", "expected_chunk_id": "e04b6004-470d-42d6-abbd-f702dca82097", "note": "table-dependent, numbers-only chunk"},
+    {"id": "ic-12", "label": "in_corpus", "question": "What does the NIST IoT Device Cybersecurity Core Baseline define?", "expected_chunk_id": "c9817ff6-6629-42fd-8d74-3b9c1f5f2d30"},
+
+    {"id": "oc-01", "label": "out_of_corpus", "question": "What is the current market capitalization of Nvidia?"},
+    {"id": "oc-02", "label": "out_of_corpus", "question": "Who won the 2022 FIFA World Cup and what was the final score?"},
+    {"id": "oc-03", "label": "out_of_corpus", "question": "How does the CRISPR-Cas9 system cut a target DNA sequence?"},
+    {"id": "oc-04", "label": "out_of_corpus", "question": "What were the main causes of the French Revolution?"},
+    {"id": "oc-05", "label": "out_of_corpus", "question": "How do I create a Python virtual environment on Windows?"},
+    {"id": "oc-06", "label": "out_of_corpus", "question": "Summarize the plot of Pride and Prejudice."},
+    {"id": "oc-07", "label": "out_of_corpus", "question": "What is Nigeria's national minimum wage?", "note": "adjacent: corpus covers Nigeria energy only"},
+    {"id": "oc-08", "label": "out_of_corpus", "question": "What was Indonesia's GDP growth rate in 2024?", "note": "adjacent: corpus covers Indonesia energy only"},
+    {"id": "oc-09", "label": "out_of_corpus", "question": "What is the recommended daily dose of ibuprofen for adults?", "note": "adjacent: health job aids in corpus"},
+    {"id": "oc-10", "label": "out_of_corpus", "question": "What is NASA's budget request for fiscal year 2030?", "note": "adjacent: corpus covers the FY 2023 request"},
+    {"id": "oc-11", "label": "out_of_corpus", "question": "What was the U.S. unemployment rate in 2023?", "note": "adjacent: BLS documents date from 2012-2013"},
+    {"id": "oc-12", "label": "out_of_corpus", "question": "What are the common side effects of mRNA COVID-19 vaccines?", "note": "adjacent: respiratory surveillance template in corpus"}
+  ]
+}

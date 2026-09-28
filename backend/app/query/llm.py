@@ -19,15 +19,23 @@ def warm_up() -> None:
     _client.warm_up_generation()
 
 
-async def generate(stage: str, prompt: str, max_output_tokens: int) -> str:
+async def generate(
+    stage: str, prompt: str, max_output_tokens: int, model: str | None = None
+) -> str:
     return await asyncio.to_thread(
-        _client.generate, stage, settings.QUERY_MODEL, prompt, minimal_thinking_config(max_output_tokens)
+        _client.generate,
+        stage,
+        model or settings.QUERY_MODEL,
+        prompt,
+        minimal_thinking_config(max_output_tokens),
     )
 
 
-async def generate_json(stage: str, prompt: str, max_output_tokens: int) -> Any | None:
+async def generate_json(
+    stage: str, prompt: str, max_output_tokens: int, model: str | None = None
+) -> Any | None:
     try:
-        text = await generate(stage, prompt, max_output_tokens)
+        text = await generate(stage, prompt, max_output_tokens, model)
     except Exception:  # noqa: BLE001 - callers decide the fallback
         logger.warning("%s: LLM call failed", stage, exc_info=True)
         return None

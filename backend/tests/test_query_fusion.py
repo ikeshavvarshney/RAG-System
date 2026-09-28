@@ -44,6 +44,17 @@ def test_duplicates_collapse_with_provenance_from_every_list():
     }
 
 
+def test_provenance_keeps_the_raw_retriever_scores():
+    fused = fuse(_result(), dense_weight=0.5, k=60)
+
+    both = next(c for c in fused if c.chunk_id == "both")
+    assert {(p.retriever, p.query, p.score) for p in both.provenance} == {
+        ("vector", "q1", 0.8),
+        ("vector", "q2", 0.7),
+        ("keyword", None, 9.0),
+    }
+
+
 def test_dense_weight_reorders_results():
     dense_heavy = _ids(fuse(_result(), dense_weight=0.9, k=60))
     sparse_heavy = _ids(fuse(_result(), dense_weight=0.1, k=60))

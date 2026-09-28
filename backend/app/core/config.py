@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     RERANK_TOP_K: int = Field(default=8, ge=1)
     CONTEXT_TOKEN_BUDGET: int = Field(default=3000, ge=1)
 
+    #--- Sufficiency (Week 5) ---
+    # Gated on the best dense cosine similarity, since RRF scores carry no absolute relevance and BM25 is unbounded.
+    # Provisional: a 24-question probe of the real corpus put in-corpus at 0.85-0.90 and out-of-corpus at 0.76-0.89.
+    SUFFICIENCY_HIGH_THRESHOLD: float = Field(default=0.89, ge=0.0, le=1.0)
+    SUFFICIENCY_LOW_THRESHOLD: float = Field(default=0.80, ge=0.0, le=1.0)
+    SUFFICIENCY_LLM_ENABLED: bool = True
+    SUFFICIENCY_LLM_MODEL: str = "gemini-3.5-flash-lite"
+    SUFFICIENCY_LLM_TOP_K: int = Field(default=5, ge=1)
+    SUFFICIENCY_LLM_PASSAGE_CHARS: int = Field(default=700, ge=50)
+    SUFFICIENCY_LLM_MAX_OUTPUT_TOKENS: int = Field(default=200, ge=16)
+
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)
     # "paddle-structure"  PP-StructureV3: layout + table structure recovery
@@ -125,6 +136,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"CHUNK_MIN_TOKENS ({self.CHUNK_MIN_TOKENS}) cannot exceed "
                 f"CHUNK_MAX_TOKENS ({self.CHUNK_MAX_TOKENS})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_sufficiency_thresholds(self) -> "Settings":
+        if self.SUFFICIENCY_LOW_THRESHOLD > self.SUFFICIENCY_HIGH_THRESHOLD:
+            raise ValueError(
+                f"SUFFICIENCY_LOW_THRESHOLD ({self.SUFFICIENCY_LOW_THRESHOLD}) cannot exceed "
+                f"SUFFICIENCY_HIGH_THRESHOLD ({self.SUFFICIENCY_HIGH_THRESHOLD})"
             )
         return self
 

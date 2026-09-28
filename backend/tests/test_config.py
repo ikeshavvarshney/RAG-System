@@ -52,6 +52,18 @@ def test_absolute_storage_paths_are_kept(field, tmp_path):
     assert getattr(s, field) == str(tmp_path / "store")
 
 
+def test_sufficiency_low_threshold_cannot_exceed_high():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, SUFFICIENCY_LOW_THRESHOLD=0.9, SUFFICIENCY_HIGH_THRESHOLD=0.8)
+
+
+def test_sufficiency_defaults_are_ordered_and_llm_stage_is_on():
+    s = Settings(_env_file=None)
+
+    assert s.SUFFICIENCY_LOW_THRESHOLD < s.SUFFICIENCY_HIGH_THRESHOLD
+    assert s.SUFFICIENCY_LLM_ENABLED
+
+
 def test_query_and_vision_models_default_to_flash_lite():
     s = Settings(_env_file=None)
 
