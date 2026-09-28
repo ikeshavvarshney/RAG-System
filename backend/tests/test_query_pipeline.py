@@ -7,6 +7,7 @@ import pytest
 from app.core.config import settings
 from app.ingestion.indexer import index_chunks
 from app.query import cache, history, retrieval
+from app.query.expansion import expand_query
 from app.query.fusion import Candidate, Contribution
 from app.shared import session_store
 from app.shared.session_store import get_session_stores, scope_for
@@ -32,6 +33,7 @@ LLM_CHECKS = [
 ]
 HISTORY = [("history", "started"), ("history", "completed")]
 CACHE = [("cache", "started"), ("cache", "completed")]
+DECOMPOSITION = [("decomposition", "started"), ("decomposition", "completed")]
 EXPANSION = [("expansion", "started"), ("expansion", "completed")]
 RETRIEVAL = [("retrieval", "started"), ("retrieval", "completed")]
 FUSION = [("fusion", "started"), ("fusion", "completed")]
@@ -135,7 +137,7 @@ def test_full_path_emits_every_stage_in_order(fake_llm, corpus):
 
     result, events = _run("how did revenue grow this quarter?")
 
-    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + EXPANSION + RETRIEVAL + RANKING
+    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + DECOMPOSITION + EXPANSION + RETRIEVAL + RANKING
     assert result.terminated_at == "retrieved"
     assert result.expanded_queries == ["how did revenue grow this quarter?", "sales growth"]
 
@@ -242,7 +244,7 @@ def test_follow_up_is_answered_from_the_resolved_question(fake_llm, corpus, monk
     assert {h.query for h in result.retrieval.vector_hits} == {result.resolved_question}
     assert {h.chunk_id for h in result.retrieval.keyword_hits} == {"c1"}
     assert "query_history" in _stages(fake_llm)
-    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + EXPANSION + RETRIEVAL + RANKING
+    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + DECOMPOSITION + EXPANSION + RETRIEVAL + RANKING
 
 
 def test_unrelated_question_after_a_turn_is_not_rewritten(fake_llm, corpus):
@@ -292,6 +294,7 @@ def test_cache_hit_terminates_at_the_cache_stage(fake_llm, corpus):
     assert result.retrieval.vector_hits == [] and result.retrieval.keyword_hits == []
     assert events == FRONT + LLM_CHECKS + HISTORY + CACHE
     assert "query_expansion" not in _stages(fake_llm)
+    assert "query_decomposition" not in _stages(fake_llm)
 
 
 def test_cache_is_looked_up_with_the_resolved_question_not_the_raw_one(fake_llm, corpus):
@@ -597,3 +600,109 @@ def test_web_results_survive_a_failed_rerank(fake_llm, corpus, insufficient, mon
 
     assert not result.reranked
     assert [c.chunk_id for c in result.context[:2]] == ["web:1", "web:2"]
+
+
+COMPOUND = "How did revenue grow this quarter, and what does the appendix list about suppliers?"
+SUB_QUESTIONS = ["How did revenue grow this quarter?", "What does the appendix list about suppliers?"]
+
+
+def _decomposes(fake_llm, sub_questions=SUB_QUESTIONS):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+    fake_llm.replies["query_decomposition"] = json.dumps({"sub_questions": sub_questions})
+
+
+def test_simple_question_is_not_decomposed_and_costs_no_llm_call(fake_llm, corpus):
+    fake_llm.replies["query_guardrail"] = SAFE
+    fake_llm.replies["query_expansion"] = "[]"
+
+    result, events = _run("how did revenue grow this quarter?")
+
+    assert result.sub_queries == []
+    assert "query_decomposition" not in _stages(fake_llm)
+    assert DECOMPOSITION[0] in events
+
+
+def test_compound_question_retrieves_for_each_sub_question(fake_llm, corpus):
+    _decomposes(fake_llm)
+
+    result, _ = _run(COMPOUND)
+
+    assert result.terminated_at == "retrieved"
+    assert [sq.question for sq in result.sub_queries] == SUB_QUESTIONS
+    assert all(sq.retrieval.vector_hits and sq.fused and sq.context for sq in result.sub_queries)
+    assert all(sq.sufficiency is not None for sq in result.sub_queries)
+    assert result.retrieval.vector_hits == [] and result.context == []
+    assert _stages(fake_llm).count("query_expansion") == 2
+    for sub_query, question in zip(result.sub_queries, SUB_QUESTIONS):
+        assert {h.query for h in sub_query.retrieval.vector_hits} == {question}
+
+
+def test_sub_question_stage_events_carry_their_index(fake_llm, corpus):
+    _decomposes(fake_llm)
+    events: list[StageEvent] = []
+
+    asyncio.run(run_query(COMPOUND, SESSION, on_event=events.append))
+
+    for index in (0, 1):
+        mine = [(e.stage, e.status) for e in events if e.sub_question == index]
+        assert mine == EXPANSION + RETRIEVAL + RANKING
+    assert all(e.sub_question is None for e in events if e.stage in ("cache", "decomposition", "history"))
+
+
+def test_decomposition_declining_leaves_the_single_question_path(fake_llm, corpus):
+    _decomposes(fake_llm, [])
+
+    result, events = _run(COMPOUND)
+
+    assert result.sub_queries == []
+    assert result.expanded_queries[0] == COMPOUND
+    assert result.context
+    assert events[-len(RETRIEVAL + RANKING):] == RETRIEVAL + RANKING
+
+
+def test_decomposition_failure_falls_back_to_the_single_question(fake_llm, corpus):
+    _decomposes(fake_llm)
+    fake_llm.replies["query_decomposition"] = RuntimeError("down")
+
+    result, _ = _run(COMPOUND)
+
+    assert result.terminated_at == "retrieved" and result.sub_queries == []
+    assert result.context
+
+
+def test_decomposed_turn_is_recorded_once_against_the_full_question(fake_llm, corpus):
+    _decomposes(fake_llm)
+
+    _run(COMPOUND)
+
+    turns = history._store.turns(SESSION)
+    assert [(t.raw_question, t.resolved_question) for t in turns] == [(COMPOUND, COMPOUND)]
+
+
+def test_a_failing_sub_question_propagates_with_its_index(fake_llm, corpus, monkeypatch):
+    _decomposes(fake_llm)
+
+    async def flaky(question):
+        if question == SUB_QUESTIONS[1]:
+            raise RuntimeError("expansion down")
+        return await expand_query(question)
+
+    monkeypatch.setattr("app.query.pipeline.expand_query", flaky)
+    events: list[StageEvent] = []
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run_query(COMPOUND, SESSION, on_event=events.append))
+
+    failed = [e for e in events if e.status == "failed"]
+    assert [(e.stage, e.sub_question) for e in failed] == [("expansion", 1)]
+    assert history._store.turns(SESSION) == []
+
+
+def test_sub_questions_share_the_session_scope(fake_llm, session_uploads):
+    _decomposes(fake_llm)
+
+    result, _ = _run(COMPOUND)
+
+    hits = [h for sq in result.sub_queries for h in sq.retrieval.vector_hits + sq.retrieval.keyword_hits]
+    assert {h.chunk_id for h in hits} == {"u1"}

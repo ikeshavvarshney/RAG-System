@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Real pairs: paraphrases 0.976-0.989, same-topic-different-question 0.93, unrelated 0.81.
     CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.96, ge=0.0, le=1.0)
 
+    #--- Decomposition (Week 5) ---
+    DECOMPOSITION_ENABLED: bool = True
+    DECOMPOSITION_MAX_SUB_QUESTIONS: int = Field(default=4, ge=2, le=6)
+
     #--- Fusion and reranking (Week 5) ---
     # Dense share of the RRF score, the RQ1 ablation variable. 1.0 is dense-only, 0.0 sparse-only.
     FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)

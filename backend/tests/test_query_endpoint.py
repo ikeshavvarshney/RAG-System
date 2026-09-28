@@ -120,3 +120,17 @@ def test_cache_hit_returns_answer_and_citations(client, fake_llm, monkeypatch):
     assert body["citations"] == [
         {"kind": "corpus", "source_doc": "nasa.pdf", "page": 1, "chunk_id": "c9"}
     ]
+
+
+def test_decomposed_question_returns_its_sub_queries(client, fake_llm, corpus):
+    fake_llm.replies["query_guardrail"] = '{"safe": true}'
+    fake_llm.replies["query_expansion"] = "[]"
+    fake_llm.replies["query_decomposition"] = '{"sub_questions": ["how did revenue grow?", "what did sales do?"]}'
+
+    body = client.post(
+        "/api/query", json={"question": "how did revenue grow, and what did sales do this year?"}
+    ).json()
+
+    assert body["terminated_at"] == "retrieved"
+    assert [sq["question"] for sq in body["sub_queries"]] == ["how did revenue grow?", "what did sales do?"]
+    assert all(sq["context"] and sq["sufficiency"]["sufficient"] is not None for sq in body["sub_queries"])

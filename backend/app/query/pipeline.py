@@ -4,11 +4,13 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Literal
 
 from app.core.config import settings
 from app.ingestion.indexer import get_keyword_index, get_vector_store
 from app.query import cache
+from app.query.decomposition import decompose
 from app.query.expansion import expand_query
 from app.query.fusion import Candidate, fuse
 from app.query.greeting import classify_greeting, match_greeting
@@ -32,6 +34,7 @@ Stage = Literal[
     "greeting_llm",
     "history",
     "cache",
+    "decomposition",
     "expansion",
     "retrieval",
     "fusion",
@@ -46,6 +49,19 @@ class StageEvent:
     stage: Stage
     status: Literal["started", "completed", "failed"]
     duration_ms: float | None = None
+    sub_question: int | None = None
+
+
+@dataclass
+class SubQuery:
+    question: str
+    expanded_queries: list[str]
+    retrieval: RetrievalResult
+    fused: list[Candidate]
+    sufficiency: SufficiencyResult
+    web_search: WebSearchResult | None
+    context: list[Candidate]
+    reranked: bool
 
 
 @dataclass
@@ -60,6 +76,7 @@ class QueryResult:
     web_search: WebSearchResult | None = None
     context: list[Candidate] = field(default_factory=list)
     reranked: bool = False
+    sub_queries: list[SubQuery] = field(default_factory=list)
     response: str | None = None
     answer: str | None = None
     citations: list[Citation] = field(default_factory=list)
@@ -147,22 +164,62 @@ async def retrieve_and_rank(
     return RankedRetrieval(queries, retrieval, fused, sufficiency, web_search, context)
 
 
+async def _retrieve_sub_questions(
+    sub_questions: list[str],
+    stage: Callable[..., AbstractContextManager[None]],
+    *,
+    corpus_scope: str,
+    vector_store: VectorStore,
+    keyword_index: KeywordIndex,
+) -> list[SubQuery]:
+    outcomes = await asyncio.gather(
+        *(
+            retrieve_and_rank(
+                question,
+                partial(stage, sub_question=index),
+                corpus_scope=corpus_scope,
+                vector_store=vector_store,
+                keyword_index=keyword_index,
+            )
+            for index, question in enumerate(sub_questions)
+        ),
+        return_exceptions=True,
+    )
+    # Every sibling has finished by now, so raising cannot orphan a running retrieval.
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    return [
+        SubQuery(
+            question,
+            ranked.expanded_queries,
+            ranked.retrieval,
+            ranked.fused,
+            ranked.sufficiency,
+            ranked.web_search,
+            ranked.context.passages,
+            ranked.context.reranked,
+        )
+        for question, ranked in zip(sub_questions, outcomes)
+    ]
+
+
 async def run_query(
     question: str, session_id: str, on_event: EventCallback | None = None
 ) -> QueryResult:
     @contextmanager
-    def stage(name: Stage) -> Iterator[None]:
+    def stage(name: Stage, sub_question: int | None = None) -> Iterator[None]:
         if on_event:
-            on_event(StageEvent(name, "started"))
+            on_event(StageEvent(name, "started", sub_question=sub_question))
         began = time.perf_counter()
         try:
             yield
         except BaseException:
             if on_event:
-                on_event(StageEvent(name, "failed", _elapsed_ms(began)))
+                on_event(StageEvent(name, "failed", _elapsed_ms(began), sub_question))
             raise
         if on_event:
-            on_event(StageEvent(name, "completed", _elapsed_ms(began)))
+            on_event(StageEvent(name, "completed", _elapsed_ms(began), sub_question))
 
     with stage("guardrail"):
         verdict = check_deterministic(question)
@@ -203,6 +260,19 @@ async def run_query(
             answer=hit.answer,
             citations=hit.citations,
         )
+
+    with stage("decomposition"):
+        sub_questions = await decompose(resolved_question)
+    if sub_questions:
+        sub_queries = await _retrieve_sub_questions(
+            sub_questions,
+            stage,
+            corpus_scope=corpus_scope,
+            vector_store=vector_store,
+            keyword_index=keyword_index,
+        )
+        record_turn(session_id, sanitized, resolved_question)
+        return QueryResult("retrieved", question, resolved_question, sub_queries=sub_queries)
 
     ranked = await retrieve_and_rank(
         resolved_question,
