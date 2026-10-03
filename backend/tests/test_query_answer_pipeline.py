@@ -180,3 +180,56 @@ def test_summary_falls_back_to_a_word_boundary():
     summary = summarize_answer("word " * 100)
 
     assert len(summary) <= SUMMARY_CHARS + 1 and summary.endswith("word…")
+
+
+def _answering_from(*refs):
+    """A generation result citing the given passages, one claim line each."""
+
+    async def generate(question, passages=None, *, sub_contexts=None, stage=None):
+        lines = [f"Claim number {r.number} is stated in this passage for the reader [{r.number}]." for r in refs]
+        return GenerationResult(answer="\n".join(lines), passages={r.number: r for r in refs})
+
+    return generate
+
+
+def _corpus_ref(n):
+    from app.query.generation import PassageRef
+
+    return PassageRef(number=n, chunk_id=f"c{n}", kind="corpus", source_doc=f"doc{n}.pdf", page=1, score=0.9, snippet="s")
+
+
+def _web_ref(n):
+    from app.query.generation import PassageRef
+
+    return PassageRef(
+        number=n, chunk_id=f"web:{n}", kind="web", source_url=f"https://example.com/{n}", title="T", score=0.8, snippet="s"
+    )
+
+
+def test_corpus_only_answer_is_cached(corpus, monkeypatch):
+    monkeypatch.setattr(pipeline, "generate_answer", _answering_from(_corpus_ref(1), _corpus_ref(2)))
+
+    result, _ = _run(QUESTION)
+
+    assert {c.kind for c in result.citations} == {"corpus"}
+    assert cache.get_answer_cache().count() == 1
+
+
+def test_mixed_corpus_and_web_answer_is_not_cached(corpus, monkeypatch, caplog):
+    monkeypatch.setattr(pipeline, "generate_answer", _answering_from(_corpus_ref(1), _web_ref(2)))
+
+    with caplog.at_level("DEBUG", logger="app.query.pipeline"):
+        result, _ = _run(QUESTION)
+
+    assert {c.kind for c in result.citations} == {"corpus", "web"}
+    assert cache.get_answer_cache().count() == 0
+    assert "answer cites web sources" in caplog.text
+
+
+def test_web_only_answer_is_not_cached(corpus, monkeypatch):
+    monkeypatch.setattr(pipeline, "generate_answer", _answering_from(_web_ref(1), _web_ref(2)))
+
+    result, _ = _run(QUESTION)
+
+    assert {c.kind for c in result.citations} == {"web"}
+    assert cache.get_answer_cache().count() == 0

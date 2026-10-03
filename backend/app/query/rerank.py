@@ -1,6 +1,7 @@
 import logging
 import re
 import threading
+import time
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -32,9 +33,11 @@ def _load_model() -> Any:
         if _model is None:
             from sentence_transformers import CrossEncoder
 
+            began = time.perf_counter()
             _model = CrossEncoder(
                 settings.RERANK_MODEL, device="cpu", max_length=settings.RERANK_MAX_LENGTH
             )
+            logger.info("reranker %s loaded in %.1fs", settings.RERANK_MODEL, time.perf_counter() - began)
     return _model
 
 

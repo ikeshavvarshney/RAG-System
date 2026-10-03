@@ -274,14 +274,20 @@ async def finalize_answer(
     else:
         answer, citations, summary = guarded.answer, semantic.citations, summarize_answer(guarded.answer)
 
-    # Only a verified, safe, real answer to a corpus question is worth serving again.
-    cacheable = (
-        guarded.passed
-        and not semantic.is_non_answer
-        and bool(citations)
-        and verification.safety.reason != UNAVAILABLE
-        and corpus_scope == PERSISTENT_SCOPE
-    )
+    # Only a verified, safe, real answer to a corpus question is worth serving again. Web-derived
+    # answers go stale and nothing would ever invalidate them.
+    blockers = {
+        "output guardrail failed": not guarded.passed,
+        "non-answer": semantic.is_non_answer,
+        "no citations": not citations,
+        "verification unavailable": verification.safety.reason == UNAVAILABLE,
+        "session-scoped answer": corpus_scope != PERSISTENT_SCOPE,
+        "answer cites web sources": any(c.kind == "web" for c in citations),
+    }
+    skipped = [reason for reason, applies in blockers.items() if applies]
+    if skipped:
+        logger.debug("answer not cached: %s", "; ".join(skipped))
+    cacheable = not skipped
     return FinalAnswer(
         generation,
         answer,
