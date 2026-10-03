@@ -40,12 +40,11 @@ def test_table_cell_text_is_not_dropped():
     )
 
     result = extract(docx_bytes, "sample.docx")
-    texts = [c["text"] for c in result]
+    text = "\n".join(c["text"] for c in result)
 
-    assert "Revenue" in texts
-    assert "1000" in texts
-    assert "Expenses" in texts
-    assert "500" in texts
+    # A table is one markdown block now, not one piece per cell.
+    for cell in ("Revenue", "1000", "Expenses", "500"):
+        assert cell in text
 
 
 def test_page_is_none_and_location_is_populated():

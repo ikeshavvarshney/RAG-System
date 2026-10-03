@@ -104,8 +104,12 @@ def page_needs_vision(text: str, image_coverage: float) -> bool:
 # --------------------------------------------------------------------------- #
 # Extraction
 # --------------------------------------------------------------------------- #
-def extract_pages(items: list[VisionPage]) -> list[dict]:
-    """Run the vision pass over a batch, spending MAX_VISION_PAGES as a budget."""
+def extract_pages(items: list[VisionPage], *, skip_failures: bool = False) -> list[dict]:
+    """Run the vision pass over a batch, spending MAX_VISION_PAGES as a budget.
+
+    With ``skip_failures`` an item that fails both vision and OCR is logged and dropped instead of failing the
+    batch, for callers (DOCX) whose other content should survive one bad image.
+    """
     cap = settings.MAX_VISION_PAGES
     if len(items) > cap:
         logger.warning(
@@ -117,24 +121,29 @@ def extract_pages(items: list[VisionPage]) -> list[dict]:
 
     pieces: list[dict] = []
     for position, item in enumerate(items):
-        if position < cap:
-            pieces.append(
-                extract_image(
-                    item.image_bytes,
-                    page=item.page,
-                    location=item.location,
-                    mime_type=item.mime_type,
+        try:
+            if position < cap:
+                pieces.append(
+                    extract_image(
+                        item.image_bytes,
+                        page=item.page,
+                        location=item.location,
+                        mime_type=item.mime_type,
+                    )
                 )
-            )
-        else:
-            pieces.append(
-                _ocr_fallback(
-                    item.image_bytes,
-                    item.page,
-                    item.location,
-                    f"over MAX_VISION_PAGES={cap} budget for this file",
+            else:
+                pieces.append(
+                    _ocr_fallback(
+                        item.image_bytes,
+                        item.page,
+                        item.location,
+                        f"over MAX_VISION_PAGES={cap} budget for this file",
+                    )
                 )
-            )
+        except VisionExtractionError as exc:
+            if not skip_failures:
+                raise
+            logger.warning("dropping image (page=%s, location=%s): %s", item.page, item.location, exc)
 
     return pieces
 
