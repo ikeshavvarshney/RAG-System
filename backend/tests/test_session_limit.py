@@ -27,7 +27,7 @@ def test_session_upload_over_document_limit_is_rejected_with_409(monkeypatch):
     response = _upload(client, new_session_id(), ["a.pdf", "b.pdf", "c.pdf"])
 
     assert response.status_code == 409
-    assert "2" in response.json()["detail"]
+    assert "2" in response.json()["error"]["message"]
 
 
 def test_session_limit_counts_documents_already_held(monkeypatch):

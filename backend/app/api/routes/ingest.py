@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from app.core.config import settings
-from app.ingestion.pipeline import FileError, ingest_files
+from app.api.schemas import ERRORS, IngestResponse, SessionResponse
+from app.chains import ingestion_chain
+from app.ingestion.pipeline import FileError
 from app.query import cache
 from app.shared.session_store import (
     PERSISTENT_SCOPE,
@@ -23,9 +25,19 @@ MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 # File type is not validated here.
 
 
-@router.post("/ingest")
+@router.post("/ingest", response_model=IngestResponse, responses=ERRORS)
 async def ingest(files: list[UploadFile], session_id: str | None = Form(default=None)):
     """Ingest documents into the corpus, or into one session's own store."""
+    return await _ingest_upload(files, session_id)
+
+
+@router.post("/session/upload", response_model=IngestResponse, responses=ERRORS)
+async def upload_to_session(files: list[UploadFile], session_id: str = Form()):
+    """Ingest documents into one session's own store (USERDOC-01)."""
+    return await _ingest_upload(files, session_id)
+
+
+async def _ingest_upload(files: list[UploadFile], session_id: str | None) -> dict:
     if len(files) > MAX_FILES_PER_REQUEST:
         raise HTTPException(
             status_code=413,
@@ -57,7 +69,7 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
         file_payloads.append((upload.filename, content))
 
     if session_id is None:
-        result = ingest_files(file_payloads, corpus_scope=PERSISTENT_SCOPE)
+        result = await ingestion_chain.ainvoke({"files": file_payloads, "corpus_scope": PERSISTENT_SCOPE})
     else:
         try:
             validate_issued_session_id(session_id)
@@ -77,11 +89,13 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
                 ),
             )
 
-        result = ingest_files(
-            file_payloads,
-            corpus_scope=scope_for(session_id),
-            vector_store=vector_store,
-            keyword_index=keyword_index,
+        result = await ingestion_chain.ainvoke(
+            {
+                "files": file_payloads,
+                "corpus_scope": scope_for(session_id),
+                "vector_store": vector_store,
+                "keyword_index": keyword_index,
+            }
         )
 
     failures = oversized + result.failed
@@ -109,7 +123,7 @@ async def ingest(files: list[UploadFile], session_id: str | None = Form(default=
     }
 
 
-@router.post("/session")
+@router.post("/session", response_model=SessionResponse)
 async def create_session():
     """Issue a session id for scoping uploads."""
     return {"session_id": new_session_id()}

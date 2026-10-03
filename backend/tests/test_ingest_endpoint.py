@@ -110,7 +110,7 @@ def test_batch_over_file_limit_is_rejected_with_413():
     response = client.post("/api/ingest", files=files)
 
     assert response.status_code == 413
-    assert str(MAX_FILES_PER_REQUEST) in response.json()["detail"]
+    assert str(MAX_FILES_PER_REQUEST) in response.json()["error"]["message"]
 
 
 def test_file_limit_clears_the_research_corpus():

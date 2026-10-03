@@ -29,19 +29,20 @@ def test_empty_question_returns_guardrail_result(client, fake_llm):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["terminated_at"] == "guardrail"
-    assert body["response"]
+    assert [st["stage"] for st in body["stages"]][-1] == "guardrail"
+    assert body["answer"]
+    assert body["citations"] == [] and body["groundedness"] is None
 
 
 def test_greeting_short_circuits(client, fake_llm):
     body = client.post("/api/query", json={"question": "hi"}).json()
 
     assert fake_llm.calls == []
-    assert body["terminated_at"] == "greeting"
-    assert body["retrieval"] == {"vector_hits": [], "keyword_hits": []}
+    assert [st["stage"] for st in body["stages"]][-1] == "greeting"
+    assert body["answer"] and body["citations"] == [] and body["decomposed"] is False
 
 
-def test_question_returns_both_hit_lists_and_ignores_session_id(client, fake_llm, corpus):
+def test_question_returns_a_cited_answer_with_stages_and_verdicts(client, fake_llm, corpus):
     fake_llm.replies["query_guardrail"] = '{"safe": true}'
     fake_llm.replies["query_expansion"] = '["sales growth"]'
 
@@ -52,12 +53,14 @@ def test_question_returns_both_hit_lists_and_ignores_session_id(client, fake_llm
 
     assert response.status_code == 200
     body = response.json()
-    assert body["terminated_at"] == "retrieved"
+    assert [st["stage"] for st in body["stages"]][-1] == "output_guardrail"
     assert body["raw_question"] == "how did revenue grow?"
     assert body["resolved_question"] == "how did revenue grow?"
-    assert body["expanded_queries"] == ["how did revenue grow?", "sales growth"]
-    assert [h["chunk_id"] for h in body["retrieval"]["keyword_hits"]] == ["c1"]
-    assert {h["retriever"] for h in body["retrieval"]["vector_hits"]} == {"vector"}
+    assert body["answer"] == "Stub answer [1]."
+    assert [c["source_doc"] for c in body["citations"]] == ["report.pdf"]
+    assert {"expansion", "retrieval", "generation", "verification"} <= {s["stage"] for s in body["stages"]}
+    assert body["groundedness"]["score"] == 1.0 and body["safety"]["verdict"] == "pass"
+    assert body["cache_hit"] is False and body["decomposed"] is False and body["sub_questions"] is None
 
 
 def test_missing_question_is_rejected_by_schema(client):
@@ -115,7 +118,7 @@ def test_cache_hit_returns_answer_and_citations(client, fake_llm, monkeypatch):
 
     body = client.post("/api/query", json={"question": "what was the funding request?"}).json()
 
-    assert body["terminated_at"] == "cache_hit"
+    assert body["cache_hit"] is True
     assert body["answer"] == "It was $822 million."
     assert body["citations"] == [
         {"kind": "corpus", "source_doc": "nasa.pdf", "page": 1, "chunk_id": "c9", "score": None, "snippet": ""}
@@ -131,6 +134,7 @@ def test_decomposed_question_returns_its_sub_queries(client, fake_llm, corpus):
         "/api/query", json={"question": "how did revenue grow, and what did sales do this year?"}
     ).json()
 
-    assert body["terminated_at"] == "retrieved"
-    assert [sq["question"] for sq in body["sub_queries"]] == ["how did revenue grow?", "what did sales do?"]
-    assert all(sq["context"] and sq["sufficiency"]["sufficient"] is not None for sq in body["sub_queries"])
+    assert [st["stage"] for st in body["stages"]][-1] == "output_guardrail"
+    assert body["decomposed"] is True
+    assert body["sub_questions"] == ["how did revenue grow?", "what did sales do?"]
+    assert any(s["sub_question"] == 1 for s in body["stages"])

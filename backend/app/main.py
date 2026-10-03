@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, ingest, query
+from app.api.errors import register_error_handlers
+from app.api.routes import documents, health, ingest, query
 from app.core.config import settings
 from app.core.warmup import warm_up_clients
 from app.shared.session_store import purge_expired
@@ -45,8 +46,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    register_error_handlers(app)
+
     app.include_router(health.router, prefix="/api")
     app.include_router(ingest.router, prefix="/api")
+    app.include_router(documents.router, prefix="/api")
     app.include_router(query.router, prefix="/api")
     return app
 
