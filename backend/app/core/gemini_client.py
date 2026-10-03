@@ -52,6 +52,13 @@ _DAILY_QUOTA_BLOCK_SEC = 3600
 _EMBED_REQUEST_INTERVAL_SEC = 0.9
 
 
+# Bounds every text-model request, connect included, so an unreachable network fails in two minutes instead of
+# waiting out the OS connect timeout once per resolved address (about 170 s seen). `client_args` timeouts do not
+# work here: the SDK passes a per-request timeout of None, which httpx treats as "no timeout" and which overrides
+# the client's own. HttpOptions.timeout is applied per request, but it covers every phase, so connect cannot be
+# bounded separately.
+_TEXT_HTTP_OPTIONS = types.HttpOptions(timeout=120_000)  # milliseconds
+
 # Vision-only SDK client options: a per-request cap and NO SDK-internal retry (default is 5 attempts
 # with up to 60s backoff), so a wedged call drops to the OCR fallback (D-07) instead of the SDK's
 # own retry loop grinding for minutes.
@@ -84,7 +91,7 @@ class GeminiClient:
             cached = self._clients.get(api_key)
         if cached is not None:
             return cached
-        built = genai.Client(api_key=api_key)  # slow, so built outside the lock
+        built = genai.Client(api_key=api_key, http_options=_TEXT_HTTP_OPTIONS)  # slow, so built outside the lock
         with self._cache_lock:
             return self._clients.setdefault(api_key, built)
 

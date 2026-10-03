@@ -31,9 +31,9 @@ def _load_model() -> Any:
     global _model
     with _model_lock:
         if _model is None:
+            began = time.perf_counter()  # before the import, which is most of the cold-start cost
             from sentence_transformers import CrossEncoder
 
-            began = time.perf_counter()
             _model = CrossEncoder(
                 settings.RERANK_MODEL, device="cpu", max_length=settings.RERANK_MAX_LENGTH
             )

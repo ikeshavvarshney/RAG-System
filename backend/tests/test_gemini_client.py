@@ -361,3 +361,65 @@ def test_vision_daily_quota_blocks_the_key_for_that_model_only(monkeypatch):
         assert client.generate(stage="s", model="query-model", prompt="p") == "fine"
 
     assert used == ["vision-model", "query-model"]
+
+
+def test_text_client_is_built_with_a_request_timeout_that_covers_connect():
+    from app.core.gemini_client import _TEXT_HTTP_OPTIONS
+
+    client = GeminiClient()
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        client._client_for("key-a")
+
+    options = mock_client_cls.call_args.kwargs["http_options"]
+    assert options is _TEXT_HTTP_OPTIONS and options.timeout == 120_000
+
+
+def test_vision_client_keeps_its_own_request_timeout_and_single_attempt():
+    from app.core.gemini_client import _VISION_HTTP_OPTIONS
+
+    tracker = UsageTracker()
+    client = GeminiClient(tracker=tracker)
+    response = MagicMock()
+    response.text = "caption"
+    response.usage_metadata.prompt_token_count = 1
+    response.usage_metadata.candidates_token_count = 1
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.return_value = response
+        client.generate_vision("v", "m", "describe", b"img", "image/png")
+
+    assert mock_client_cls.call_args.kwargs["http_options"] is _VISION_HTTP_OPTIONS
+    assert _VISION_HTTP_OPTIONS.timeout == 60_000
+    assert _VISION_HTTP_OPTIONS.retry_options.attempts == 1
+
+
+def test_reranker_load_time_includes_the_import(monkeypatch, caplog):
+    import logging
+    import sys
+    import time
+    import types as pytypes
+
+    from app.query import rerank
+
+    class SlowImportCrossEncoder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    # The timer must start before the import: make the import itself take measurable time.
+    real_import = __import__
+
+    def slow_import(name, *args, **kwargs):
+        if name == "sentence_transformers":
+            time.sleep(0.3)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", pytypes.SimpleNamespace(CrossEncoder=SlowImportCrossEncoder))
+    monkeypatch.setattr(rerank, "_model", None)
+    monkeypatch.setattr("builtins.__import__", slow_import)
+
+    with caplog.at_level(logging.INFO, logger="app.query.rerank"):
+        rerank._load_model()
+
+    monkeypatch.undo()
+    assert any("loaded in" in r.message and float(r.message.split("loaded in ")[1].rstrip("s")) >= 0.3 for r in caplog.records)
