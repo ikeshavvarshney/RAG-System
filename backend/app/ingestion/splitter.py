@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
-import uuid
 
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
+from app.ingestion.chunk_ids import make_chunk_id
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ _FIXED_OVERLAP_TOKENS = 50
 def split(text: str, metadata: dict) -> list[dict]:
     """Split ``text`` into chunk dicts ready for ``Chunk(**chunk)`` construction."""
     if FIXED_SIZE_MODE:
-        return _split_fixed_size(text, metadata)
+        return _assign_ids(_split_fixed_size(text, metadata), metadata)
 
     if not text or not text.strip():
         return []
@@ -78,7 +78,7 @@ def split(text: str, metadata: dict) -> list[dict]:
 
     _attach_heading_only_chunks(chunks)
     _merge_trailing_fragments(chunks)
-    return chunks
+    return _assign_ids(chunks, metadata)
 
 
 def _segment_blocks(text: str) -> list[tuple[str, str]]:
@@ -155,9 +155,8 @@ def _text_splitter() -> RecursiveCharacterTextSplitter:
 def _make_chunk(
     text: str, metadata: dict, chunk_type: str, location: str | None
 ) -> dict:
-    """Build a chunk dict with every field ``Chunk`` requires except the ones added downstream (``corpus_scope``, ``dense_vector_id``, ``embedding_model``)."""
+    """Build a chunk dict with every field ``Chunk`` requires except the ones added downstream (``chunk_id``, ``corpus_scope``, ``dense_vector_id``, ``embedding_model``)."""
     return {
-        "chunk_id": str(uuid.uuid4()),
         "text": text,
         "source_doc": metadata.get("source_doc"),
         "page": metadata.get("page"),
@@ -165,6 +164,22 @@ def _make_chunk(
         "chunk_type": chunk_type,
         "extraction_method": metadata.get("extraction_method"),
     }
+
+
+def _assign_ids(chunks: list[dict], metadata: dict) -> list[dict]:
+    """Give each finished chunk its deterministic id. Runs last, because merging changes a chunk's text and position."""
+    for index, chunk in enumerate(chunks):
+        chunk["chunk_id"] = make_chunk_id(
+            corpus_scope=metadata.get("corpus_scope") or "",
+            source_doc=chunk["source_doc"] or "",
+            extraction_method=chunk["extraction_method"] or "",
+            chunk_type=chunk["chunk_type"],
+            page=chunk["page"],
+            location=chunk["location"],
+            index=index,
+            text=chunk["text"],
+        )
+    return chunks
 
 
 def _token_len(text: str) -> int:
@@ -200,7 +215,6 @@ def _split_fixed_size(text: str, metadata: dict) -> list[dict]:
 
 def _build_chunk_fixed(tokens: list[int], metadata: dict) -> dict:
     return {
-        "chunk_id": str(uuid.uuid4()),
         "text": _ENCODING.decode(tokens),
         "source_doc": metadata.get("source_doc"),
         "page": metadata.get("page"),

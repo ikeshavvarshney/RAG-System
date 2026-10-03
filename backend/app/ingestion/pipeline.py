@@ -1,7 +1,7 @@
-import uuid
 from dataclasses import dataclass, field
 
-from app.ingestion.indexer import IndexResult, index_chunks
+from app.ingestion.chunk_ids import make_chunk_id
+from app.ingestion.indexer import IndexResult, get_keyword_index, get_vector_store, index_chunks
 from app.ingestion.router import UnsupportedFileType, route_file
 from app.ingestion.splitter import split
 from app.shared.keyword_index import KeywordIndex
@@ -60,6 +60,7 @@ def ingest_files(
                     "page": piece.get("page"),
                     "location": piece.get("location"),
                     "extraction_method": piece.get("extraction_method"),
+                    "corpus_scope": corpus_scope,
                 }
                 if piece.get("chunk_type") in _ATOMIC_CHUNK_TYPES:
                     chunks = (
@@ -78,18 +79,40 @@ def ingest_files(
 
         result.succeeded.append(filename)
 
-    result.index = index_chunks(
-        result.chunks,
-        vector_store=vector_store,
-        keyword_index=keyword_index,
-    )
+    # Deterministic ids make an identical chunk a no-op upsert, but two chunks that hash alike within one
+    # batch would still collide inside it, so keep the first.
+    unique: dict[str, dict] = {}
+    for chunk in result.chunks:
+        unique.setdefault(chunk["chunk_id"], chunk)
+    result.chunks = list(unique.values())
+
+    store = vector_store if vector_store is not None else get_vector_store()
+    keywords = keyword_index if keyword_index is not None else get_keyword_index()
+
+    # A changed file has different chunk ids, so its old version would survive beside the new one. Clear each
+    # re-ingested document first. A file that failed extraction keeps its existing chunks.
+    cleared = sum(len(store.delete_by_document(name, corpus_scope)) for name in result.succeeded)
+
+    result.index = index_chunks(result.chunks, vector_store=store, keyword_index=keywords)
+    if cleared and result.index.total_indexed == 0:
+        keywords.rebuild()  # index_chunks only rebuilds after a write; deleting alone also stales BM25
+        result.index.keyword_index_total = len(keywords)
     return result
 
 
 def _atomic_chunk(piece: dict, metadata: dict) -> dict:
     """Wrap a self-contained vision piece as a single chunk, mirroring the dict shape produced by ``splitter._make_chunk`` and preserving the piece's ``chunk_type`` (which ``split()`` would otherwise reclassify to ``"text"``)."""
     return {
-        "chunk_id": str(uuid.uuid4()),
+        "chunk_id": make_chunk_id(
+            corpus_scope=metadata["corpus_scope"],
+            source_doc=metadata["source_doc"],
+            extraction_method=metadata["extraction_method"],
+            chunk_type=piece["chunk_type"],
+            page=metadata["page"],
+            location=metadata["location"],
+            index=0,
+            text=piece["text"],
+        ),
         "text": piece["text"],
         "source_doc": metadata["source_doc"],
         "page": metadata["page"],
