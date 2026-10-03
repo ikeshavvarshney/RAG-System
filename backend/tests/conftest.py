@@ -148,11 +148,56 @@ def stub_generation(monkeypatch):
     from app.query import generation, pipeline
 
     async def _stub(question, passages=None, *, sub_contexts=None, stage=None):
-        _, refs = generation.build_prompt(question, passages, sub_contexts)
-        if not refs:
-            return generation.GenerationResult(answer=generation.NOT_IN_CONTEXT, is_non_answer=True)
-        return generation.GenerationResult(
-            answer="Stub answer [1].", cited_markers=[1], passages=refs
-        )
+        from contextlib import nullcontext
+
+        with stage("generation") if stage else nullcontext():
+            _, refs = generation.build_prompt(question, passages, sub_contexts)
+            if not refs:
+                return generation.GenerationResult(answer=generation.NOT_IN_CONTEXT, is_non_answer=True)
+            return generation.GenerationResult(
+                answer="Stub answer [1].", cited_markers=[1], passages=refs
+            )
 
     monkeypatch.setattr(pipeline, "generate_answer", _stub)
+
+
+@pytest.fixture(autouse=True)
+def stub_verification(monkeypatch):
+    """Pipeline tests never call the verifier model: every claim is supported and the answer is safe.
+    test_query_verification imports ``verify_answer`` from app.query.verification directly, so it still
+    exercises the real one."""
+    from app.query import pipeline
+    from app.query.citations import ClaimVerdict, GroundednessResult, split_claims
+    from app.query.guardrails.output import SafetyVerdict
+    from app.query.verification import VerificationResult
+
+    async def _stub(filter_result, passage_texts=None, *, stage=None):
+        from contextlib import nullcontext
+
+        with stage("verification") if stage else nullcontext():
+            claims = [
+                ClaimVerdict(index=i, text=text, markers=markers, supported=True, reason="stub")
+                for i, (text, markers) in enumerate(split_claims(filter_result.answer))
+            ]
+            return VerificationResult(
+                groundedness=GroundednessResult(claims=claims, score=1.0 if claims else 0.0),
+                safety=SafetyVerdict(verdict="pass", reason="stub", source="llm"),
+            )
+
+    monkeypatch.setattr(pipeline, "verify_answer", _stub)
+
+
+def _hash_vector(text: str, dim: int = 8) -> list[float]:
+    """Deterministic embedding where identical text matches exactly and different text does not."""
+    import hashlib
+
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    return [(digest[i] - 127.5) / 127.5 for i in range(dim)]
+
+
+@pytest.fixture(autouse=True)
+def stub_cache_embedding(monkeypatch):
+    """Cache write-back embeds the question; tests must never do that over the network."""
+    from app.query import cache
+
+    monkeypatch.setattr(cache, "embed_queries", lambda texts: [_hash_vector(t) for t in texts])

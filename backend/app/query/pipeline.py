@@ -13,13 +13,28 @@ from app.query import cache
 from app.query.decomposition import decompose
 from app.query.expansion import expand_query
 from app.query.fusion import Candidate, fuse
+from app.query.citations import (
+    CitationFilterResult,
+    GroundednessResult,
+    RemovedClaim,
+    apply_semantic_verdicts,
+    filter_structural,
+)
 from app.query.generation import GenerationResult, generate_answer
 from app.query.greeting import classify_greeting, match_greeting
 from app.query.guardrails.input import check_deterministic, check_llm
-from app.query.history import record_turn, resolve_question
+from app.query.guardrails.output import SafetyVerdict, apply_output_guardrail
+from app.query.history import (
+    FAILED_SUMMARY,
+    NON_ANSWER_SUMMARY,
+    record_turn,
+    resolve_question,
+    summarize_answer,
+)
 from app.query.rerank import RankedContext, rerank_and_consolidate
 from app.query.retrieval import RetrievalResult, retrieve
 from app.query.sufficiency import SufficiencyResult, assess
+from app.query.verification import UNAVAILABLE, verify_answer
 from app.query.web_search import WebSearchResult, search_web
 from app.shared.keyword_index import KeywordIndex
 from app.shared.schemas.citation import Citation
@@ -83,6 +98,9 @@ class QueryResult:
     reranked: bool = False
     sub_queries: list[SubQuery] = field(default_factory=list)
     generation: GenerationResult | None = None
+    groundedness: GroundednessResult | None = None
+    safety: SafetyVerdict | None = None
+    removed_claims: list[RemovedClaim] = field(default_factory=list)
     response: str | None = None
     answer: str | None = None
     citations: list[Citation] = field(default_factory=list)
@@ -210,6 +228,83 @@ async def _retrieve_sub_questions(
     ]
 
 
+@dataclass
+class FinalAnswer:
+    generation: GenerationResult
+    answer: str
+    citations: list[Citation]
+    groundedness: GroundednessResult
+    safety: SafetyVerdict
+    removed_claims: list[RemovedClaim]
+    summary: str
+    cacheable: bool
+
+
+def _passage_texts(candidates: list[Candidate]) -> dict[str, str]:
+    """Full passage text keyed as verification expects: chunk_id for corpus, source_url for web."""
+    texts: dict[str, str] = {}
+    for candidate in candidates:
+        key = candidate.metadata.get("source_url") if candidate.source == "web" else candidate.chunk_id
+        if key:
+            texts[key] = candidate.text
+    return texts
+
+
+async def finalize_answer(
+    question: str,
+    stage: StageContext,
+    *,
+    passages: list[Candidate] | None = None,
+    sub_contexts: list[tuple[str, list[Candidate]]] | None = None,
+    corpus_scope: str,
+) -> FinalAnswer:
+    """Generate, then check the answer structurally, semantically and for safety."""
+    generation = await generate_answer(question, passages, sub_contexts=sub_contexts, stage=stage)
+    filtered: CitationFilterResult = filter_structural(generation, stage=stage)
+    candidates = list(passages or []) + [c for _, group in sub_contexts or [] for c in group]
+    verification = await verify_answer(filtered, _passage_texts(candidates), stage=stage)
+    semantic = apply_semantic_verdicts(filtered, verification.groundedness)
+    guarded = apply_output_guardrail(semantic.answer, verification.safety, stage=stage)
+
+    if not guarded.passed:
+        logger.warning("answer replaced by the safe fallback: %s", guarded.verdict.reason)
+        answer, citations, summary = guarded.answer, [], FAILED_SUMMARY
+    elif semantic.is_non_answer:
+        answer, citations, summary = guarded.answer, [], NON_ANSWER_SUMMARY
+    else:
+        answer, citations, summary = guarded.answer, semantic.citations, summarize_answer(guarded.answer)
+
+    # Only a verified, safe, real answer to a corpus question is worth serving again.
+    cacheable = (
+        guarded.passed
+        and not semantic.is_non_answer
+        and bool(citations)
+        and verification.safety.reason != UNAVAILABLE
+        and corpus_scope == PERSISTENT_SCOPE
+    )
+    return FinalAnswer(
+        generation,
+        answer,
+        citations,
+        semantic.groundedness or verification.groundedness,
+        guarded.verdict,
+        semantic.removed_claims,
+        summary,
+        cacheable,
+    )
+
+
+async def _write_cache(raw_question: str, resolved_question: str, final: FinalAnswer, scope: str) -> None:
+    if not final.cacheable:
+        return
+    try:
+        await asyncio.to_thread(
+            cache.put, raw_question, resolved_question, final.answer, final.citations, scope
+        )
+    except Exception:  # noqa: BLE001 - a broken cache must not fail an answered query
+        logger.warning("answer cache write failed; the answer is still returned", exc_info=True)
+
+
 async def run_query(
     question: str, session_id: str, on_event: EventCallback | None = None
 ) -> QueryResult:
@@ -258,7 +353,7 @@ async def run_query(
     with stage("cache"):
         hit = await _lookup_cache(resolved_question, corpus_scope)
     if hit is not None:
-        record_turn(session_id, sanitized, resolved_question, hit.answer)
+        record_turn(session_id, sanitized, resolved_question, summarize_answer(hit.answer))
         return QueryResult(
             "cache_hit",
             question,
@@ -277,19 +372,25 @@ async def run_query(
             vector_store=vector_store,
             keyword_index=keyword_index,
         )
-        generation = await generate_answer(
+        final = await finalize_answer(
             resolved_question,
+            stage,
             sub_contexts=[(sub.question, sub.context) for sub in sub_queries],
-            stage=stage,
+            corpus_scope=corpus_scope,
         )
-        record_turn(session_id, sanitized, resolved_question, generation.answer)
+        await _write_cache(sanitized, resolved_question, final, corpus_scope)
+        record_turn(session_id, sanitized, resolved_question, final.summary)
         return QueryResult(
             "retrieved",
             question,
             resolved_question,
             sub_queries=sub_queries,
-            generation=generation,
-            answer=generation.answer,
+            generation=final.generation,
+            answer=final.answer,
+            citations=final.citations,
+            groundedness=final.groundedness,
+            safety=final.safety,
+            removed_claims=final.removed_claims,
         )
 
     ranked = await retrieve_and_rank(
@@ -299,16 +400,21 @@ async def run_query(
         vector_store=vector_store,
         keyword_index=keyword_index,
     )
-    generation = await generate_answer(
-        resolved_question, ranked.context.passages, stage=stage
+    final = await finalize_answer(
+        resolved_question, stage, passages=ranked.context.passages, corpus_scope=corpus_scope
     )
-    record_turn(session_id, sanitized, resolved_question, generation.answer)
+    await _write_cache(sanitized, resolved_question, final, corpus_scope)
+    record_turn(session_id, sanitized, resolved_question, final.summary)
     return QueryResult(
         "retrieved",
         question,
         resolved_question,
-        generation=generation,
-        answer=generation.answer,
+        generation=final.generation,
+        answer=final.answer,
+        citations=final.citations,
+        groundedness=final.groundedness,
+        safety=final.safety,
+        removed_claims=final.removed_claims,
         retrieval=ranked.retrieval,
         expanded_queries=ranked.expanded_queries,
         fused=ranked.fused,

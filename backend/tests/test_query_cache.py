@@ -232,6 +232,7 @@ def test_resolved_question_is_embedded_once_across_cache_lookup_and_retrieval(mo
         return [[1.0, 0.5, 0.2] for _ in texts]
 
     monkeypatch.setattr(embedder._client, "embed_batch", embed_batch)
+    monkeypatch.setattr(cache, "embed_queries", embedder.embed_queries)  # undo the autouse stub
     cache.put("seed", "a seeded question", "answer", [], "persistent")
     sent.clear()
 

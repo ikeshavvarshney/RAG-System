@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import json
+import hashlib
 
 import pytest
 
@@ -41,6 +42,11 @@ SUFFICIENCY = [("sufficiency", "started"), ("sufficiency", "completed")]
 WEB_SEARCH = [("web_search", "started"), ("web_search", "completed")]
 RERANK = [("rerank", "started"), ("rerank", "completed")]
 RANKING = FUSION + SUFFICIENCY + RERANK
+ANSWERING = [
+    (stage, status)
+    for stage in ("generation", "citations", "verification", "output_guardrail")
+    for status in ("started", "completed")
+]
 
 
 def _chunk(chunk_id: str, text: str, scope: str = "persistent") -> Chunk:
@@ -53,6 +59,17 @@ def _chunk(chunk_id: str, text: str, scope: str = "persistent") -> Chunk:
         extraction_method="text",
         corpus_scope=scope,
     )
+
+
+def _hash_vector(text: str) -> list[float]:
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    return [(digest[i] - 127.5) / 127.5 for i in range(8)]
+
+
+def _cache_embed(texts: list[str]) -> list[list[float]]:
+    """Seeded "cached" questions share one vector; every other question gets its own, so answers written back
+    by one query in a test are not served to a different query."""
+    return [[0.1] * 8 if "cached" in t else _hash_vector(t) for t in texts]
 
 
 def _embed(texts: list[str]) -> list[list[float]]:
@@ -69,7 +86,7 @@ def corpus(monkeypatch):
         ]
     )
     monkeypatch.setattr(retrieval, "embed_queries", _embed)
-    monkeypatch.setattr(cache, "embed_queries", _embed)
+    monkeypatch.setattr(cache, "embed_queries", _cache_embed)
 
 
 def _run(question: str, session_id: str = SESSION) -> tuple[QueryResult, list[tuple[str, str]]]:
@@ -137,7 +154,7 @@ def test_full_path_emits_every_stage_in_order(fake_llm, corpus):
 
     result, events = _run("how did revenue grow this quarter?")
 
-    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + DECOMPOSITION + EXPANSION + RETRIEVAL + RANKING
+    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + DECOMPOSITION + EXPANSION + RETRIEVAL + RANKING + ANSWERING
     assert result.terminated_at == "retrieved"
     assert result.expanded_queries == ["how did revenue grow this quarter?", "sales growth"]
 
@@ -244,7 +261,7 @@ def test_follow_up_is_answered_from_the_resolved_question(fake_llm, corpus, monk
     assert {h.query for h in result.retrieval.vector_hits} == {result.resolved_question}
     assert {h.chunk_id for h in result.retrieval.keyword_hits} == {"c1"}
     assert "query_history" in _stages(fake_llm)
-    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + DECOMPOSITION + EXPANSION + RETRIEVAL + RANKING
+    assert events == FRONT + LLM_CHECKS + HISTORY + CACHE + DECOMPOSITION + EXPANSION + RETRIEVAL + RANKING + ANSWERING
 
 
 def test_unrelated_question_after_a_turn_is_not_rewritten(fake_llm, corpus):
@@ -324,7 +341,7 @@ def test_cache_failure_falls_through_to_retrieval(fake_llm, corpus, monkeypatch)
     result, events = _run("how did revenue grow?")
 
     assert result.terminated_at == "retrieved"
-    assert events[-len(RETRIEVAL + RANKING):] == RETRIEVAL + RANKING
+    assert events[-len(RETRIEVAL + RANKING + ANSWERING):] == RETRIEVAL + RANKING + ANSWERING
 
 
 def test_turn_is_recorded_after_retrieval(fake_llm, corpus):
@@ -335,7 +352,7 @@ def test_turn_is_recorded_after_retrieval(fake_llm, corpus):
 
     turns = history._store.turns(SESSION)
     assert [(t.raw_question, t.resolved_question, t.answer_summary) for t in turns] == [
-        ("how did revenue grow?", "how did revenue grow?", "Stub answer [1].")
+        ("how did revenue grow?", "how did revenue grow?", "Stub answer .")
     ]
 
 
@@ -493,7 +510,7 @@ def test_sufficient_retrieval_skips_web_search(fake_llm, corpus, monkeypatch):
 
     assert result.sufficiency is not None and result.sufficiency.sufficient
     assert result.web_search is None and searched == []
-    assert events[-len(RANKING):] == RANKING
+    assert events[-len(RANKING + ANSWERING):] == RANKING + ANSWERING
 
 
 def test_insufficient_retrieval_adds_web_results_to_the_context(fake_llm, corpus, insufficient, monkeypatch):
@@ -516,7 +533,7 @@ def test_insufficient_retrieval_adds_web_results_to_the_context(fake_llm, corpus
     assert {"c1", "c2"} <= {c.chunk_id for c in result.context}
     assert all(c.source == "web" for c in result.context if c.chunk_id.startswith("web:"))
     assert "web:1" not in {c.chunk_id for c in result.fused}
-    assert events[-len(FUSION + SUFFICIENCY + WEB_SEARCH + RERANK):] == FUSION + SUFFICIENCY + WEB_SEARCH + RERANK
+    assert events[-len(FUSION + SUFFICIENCY + WEB_SEARCH + RERANK + ANSWERING):] == FUSION + SUFFICIENCY + WEB_SEARCH + RERANK + ANSWERING
 
 
 def test_web_search_failure_degrades_to_corpus_only(fake_llm, corpus, insufficient):
@@ -658,7 +675,7 @@ def test_decomposition_declining_leaves_the_single_question_path(fake_llm, corpu
     assert result.sub_queries == []
     assert result.expanded_queries[0] == COMPOUND
     assert result.context
-    assert events[-len(RETRIEVAL + RANKING):] == RETRIEVAL + RANKING
+    assert events[-len(RETRIEVAL + RANKING + ANSWERING):] == RETRIEVAL + RANKING + ANSWERING
 
 
 def test_decomposition_failure_falls_back_to_the_single_question(fake_llm, corpus):
