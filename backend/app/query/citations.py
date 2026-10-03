@@ -27,7 +27,20 @@ _ADJACENT_DUPLICATE = re.compile(r"(\[\d+\])(?:\s*\1)+")
 
 class RemovedClaim(BaseModel):
     text: str
-    reason: str  # "uncited" | "invalid_marker"
+    reason: str  # "uncited" | "invalid_marker" | "unsupported"
+
+
+class ClaimVerdict(BaseModel):
+    index: int
+    text: str
+    markers: list[int] = Field(default_factory=list)
+    supported: bool
+    reason: str = ""
+
+
+class GroundednessResult(BaseModel):
+    claims: list[ClaimVerdict] = Field(default_factory=list)
+    score: float = 0.0
 
 
 class CitationFilterResult(BaseModel):
@@ -38,6 +51,7 @@ class CitationFilterResult(BaseModel):
     # Original marker in the generated answer -> number of the surviving citation (1-based).
     marker_map: dict[int, int] = Field(default_factory=dict)
     is_non_answer: bool = False
+    groundedness: GroundednessResult | None = None
 
 
 def _numbers(group: re.Match[str]) -> list[int]:
@@ -158,4 +172,71 @@ def _filter(generation: GenerationResult) -> CitationFilterResult:
         removed_claims=removed,
         invalid_markers=invalid,
         marker_map=marker_map,
+    )
+
+
+def split_claims(answer: str) -> list[tuple[str, list[int]]]:
+    """The claims of a filtered answer: each non-empty line that carries a citation marker, with its markers.
+
+    A claim's index is its position in this list. Marker-free lines (headings, connectives) are not claims.
+    """
+    claims = []
+    for line in answer.splitlines():
+        line = line.strip()
+        markers = [n for group in _MARKER_GROUP.finditer(line) for n in _numbers(group)]
+        if markers:
+            claims.append((line, list(dict.fromkeys(markers))))
+    return claims
+
+
+def apply_semantic_verdicts(
+    filter_result: CitationFilterResult, groundedness: GroundednessResult
+) -> CitationFilterResult:
+    """Drop the claims the verifier judged unsupported and renumber the citations that remain."""
+    unsupported = {c.index for c in groundedness.claims if not c.supported}
+    if filter_result.is_non_answer or not unsupported:
+        return filter_result.model_copy(update={"groundedness": groundedness})
+
+    removed = list(filter_result.removed_claims)
+    kept: list[str] = []
+    claim_index = 0
+    for line in filter_result.answer.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _MARKER_GROUP.search(stripped):
+            index, claim_index = claim_index, claim_index + 1
+            if index in unsupported:
+                removed.append(RemovedClaim(text=stripped, reason="unsupported"))
+                continue
+        kept.append(stripped)
+    separator = "\n\n" if "\n\n" in filter_result.answer else "\n"
+    text = separator.join(kept)
+
+    surviving: list[int] = []
+    for group in _MARKER_GROUP.finditer(text):
+        for number in _numbers(group):
+            if 1 <= number <= len(filter_result.citations) and number not in surviving:
+                surviving.append(number)
+    if not surviving:
+        return CitationFilterResult(
+            answer=NO_SUPPORT_ANSWER,
+            removed_claims=removed,
+            invalid_markers=filter_result.invalid_markers,
+            is_non_answer=True,
+            groundedness=groundedness,
+        )
+
+    renumber = {old: new for new, old in enumerate(surviving, start=1)}
+    return CitationFilterResult(
+        answer=_rewrite_markers(text, renumber.get),
+        citations=[filter_result.citations[old - 1] for old in surviving],
+        removed_claims=removed,
+        invalid_markers=filter_result.invalid_markers,
+        marker_map={
+            original: renumber[current]
+            for original, current in filter_result.marker_map.items()
+            if current in renumber
+        },
+        groundedness=groundedness,
     )

@@ -45,6 +45,7 @@ Stage = Literal[
     "generation",
     "citations",
     "output_guardrail",
+    "verification",
 ]
 
 
