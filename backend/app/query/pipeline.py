@@ -43,6 +43,7 @@ Stage = Literal[
     "web_search",
     "rerank",
     "generation",
+    "citations",
 ]
 
 

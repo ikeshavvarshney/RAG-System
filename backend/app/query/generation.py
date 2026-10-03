@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.query.pipeline import Stage
 
 STAGE = "query_generation"
+SNIPPET_CHARS = 200
 NOT_IN_CONTEXT = "The provided documents do not contain enough information to answer this question."
 
 _MARKER_GROUP = re.compile(r"\[\s*(\d+(?:\s*[,;]\s*\d+)*)\s*\]")
@@ -65,6 +66,7 @@ class PassageRef(BaseModel):
     title: str | None = None
     score: float
     chunk_type: str | None = None
+    snippet: str = ""
 
 
 class Usage(BaseModel):
@@ -105,6 +107,7 @@ class _Numbering:
             title=meta.get("title") if web else None,
             score=candidate.score,
             chunk_type=None if web else meta.get("chunk_type"),
+            snippet=" ".join(candidate.text.split())[:SNIPPET_CHARS],
         )
         self.texts[number] = candidate.text
         self._by_chunk[candidate.chunk_id] = number

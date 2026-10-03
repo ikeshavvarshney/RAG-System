@@ -8,12 +8,16 @@ class CorpusCitation(BaseModel):
     source_doc: str
     page: int | None = None
     chunk_id: str
+    score: float | None = None
+    snippet: str = ""
 
 
 class WebCitation(BaseModel):
     kind: Literal["web"] = "web"
     source_url: str
     title: str
+    score: float | None = None
+    snippet: str = ""
 
 
 Citation = Annotated[Union[CorpusCitation, WebCitation], Field(discriminator="kind")]

@@ -118,7 +118,7 @@ def test_cache_hit_returns_answer_and_citations(client, fake_llm, monkeypatch):
     assert body["terminated_at"] == "cache_hit"
     assert body["answer"] == "It was $822 million."
     assert body["citations"] == [
-        {"kind": "corpus", "source_doc": "nasa.pdf", "page": 1, "chunk_id": "c9"}
+        {"kind": "corpus", "source_doc": "nasa.pdf", "page": 1, "chunk_id": "c9", "score": None, "snippet": ""}
     ]
 
 
