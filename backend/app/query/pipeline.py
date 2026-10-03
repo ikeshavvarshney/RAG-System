@@ -44,6 +44,7 @@ Stage = Literal[
     "rerank",
     "generation",
     "citations",
+    "output_guardrail",
 ]
 
 
