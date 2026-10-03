@@ -40,7 +40,8 @@ class ClaimVerdict(BaseModel):
 
 class GroundednessResult(BaseModel):
     claims: list[ClaimVerdict] = Field(default_factory=list)
-    score: float = 0.0
+    # None when nothing was verified (non-answer, or no cited claims); a real score is always a float.
+    score: float | None = None
 
 
 class CitationFilterResult(BaseModel):

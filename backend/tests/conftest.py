@@ -180,7 +180,7 @@ def stub_verification(monkeypatch):
                 for i, (text, markers) in enumerate(split_claims(filter_result.answer))
             ]
             return VerificationResult(
-                groundedness=GroundednessResult(claims=claims, score=1.0 if claims else 0.0),
+                groundedness=GroundednessResult(claims=claims, score=1.0 if claims else None),
                 safety=SafetyVerdict(verdict="pass", reason="stub", source="llm"),
             )
 

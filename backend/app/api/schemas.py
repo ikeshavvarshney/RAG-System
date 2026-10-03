@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.query.citations import GroundednessResult
+from app.query.citations import GroundednessResult, RemovedClaim
 from app.query.emitter import NullEmitter
 from app.query.guardrails.output import SafetyVerdict
 from app.query.pipeline import QueryResult
@@ -47,6 +47,7 @@ class QueryResponse(BaseModel):
     usage: UsageSummary
     groundedness: GroundednessResult | None = None
     safety: SafetyVerdict | None = None
+    removed_claims: list[RemovedClaim] = Field(default_factory=list)
 
 
 class ErrorField(BaseModel):
@@ -95,6 +96,7 @@ def build_query_response(result: QueryResult, session_id: str, emitter: NullEmit
         usage=summarize_usage(emitter),
         groundedness=result.groundedness,
         safety=result.safety,
+        removed_claims=result.removed_claims,
     )
 
 

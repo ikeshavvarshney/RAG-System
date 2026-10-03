@@ -258,3 +258,98 @@ def test_corpus_documents_can_be_listed_and_deleted(client, monkeypatch):
     assert [d["source_doc"] for d in listed["documents"]] == ["report.pdf"]
     assert deleted.status_code == 200 and deleted.json()["deleted_chunks"] == 1
     assert after == {"documents": []}
+
+
+from test_query_endpoint import corpus  # noqa: E402,F401 - shared fixture: one indexed document
+
+
+def _generation_from(answer: str):
+    from app.query.generation import GenerationResult, PassageRef
+
+    ref = PassageRef(number=1, chunk_id="c1", kind="corpus", source_doc="report.pdf", page=3, score=0.9, snippet="s")
+
+    async def generate(question, passages=None, *, sub_contexts=None, stage=None):
+        return GenerationResult(answer=answer, passages={1: ref})
+
+    return generate
+
+
+def test_groundedness_score_is_null_when_verification_was_skipped(client, fake_llm, corpus, monkeypatch):
+    from app.query import pipeline
+    from app.query.generation import NOT_IN_CONTEXT, GenerationResult
+    from app.query.verification import verify_answer
+
+    async def non_answer(question, passages=None, *, sub_contexts=None, stage=None):
+        return GenerationResult(answer=NOT_IN_CONTEXT, is_non_answer=True)
+
+    fake_llm.replies["query_guardrail"] = '{"safe": true}'
+    fake_llm.replies["query_expansion"] = "[]"
+    monkeypatch.setattr(pipeline, "generate_answer", non_answer)
+    monkeypatch.setattr(pipeline, "verify_answer", verify_answer)  # the real one: it skips non-answers
+
+    body = client.post("/api/query", json={"question": "how did revenue grow?"}).json()
+
+    assert body["groundedness"] == {"claims": [], "score": None}
+    assert QueryResponse.model_validate(body).groundedness.score is None
+
+
+def test_groundedness_score_is_a_float_when_claims_were_verified(client, fake_llm, corpus):
+    fake_llm.replies["query_guardrail"] = '{"safe": true}'
+    fake_llm.replies["query_expansion"] = "[]"
+
+    body = client.post("/api/query", json={"question": "how did revenue grow?"}).json()
+
+    assert body["groundedness"]["score"] == 1.0 and len(body["groundedness"]["claims"]) == 1
+
+
+def test_openapi_declares_the_score_nullable(client):
+    score = client.get("/openapi.json").json()["components"]["schemas"]["GroundednessResult"]["properties"]["score"]
+
+    assert {"type": "null"} in score["anyOf"] and {"type": "number"} in score["anyOf"]
+
+
+def test_removed_claims_reach_the_response(client, fake_llm, corpus, monkeypatch):
+    from app.query import pipeline
+
+    uncited = "Margins also widened because of lower input costs and better pricing power"
+    answer = f"Revenue grew strongly across the whole year [1].\n\n{uncited}."
+    fake_llm.replies["query_guardrail"] = '{"safe": true}'
+    fake_llm.replies["query_expansion"] = "[]"
+    monkeypatch.setattr(pipeline, "generate_answer", _generation_from(answer))
+
+    body = client.post("/api/query", json={"question": "how did revenue grow?"}).json()
+
+    assert body["answer"] == "Revenue grew strongly across the whole year [1]."
+    assert body["removed_claims"] == [{"text": f"{uncited}.", "reason": "uncited"}]
+
+
+def test_unsupported_claims_are_reported_as_removed(client, fake_llm, corpus, monkeypatch):
+    from app.query import pipeline
+    from app.query.citations import ClaimVerdict, GroundednessResult, split_claims
+    from app.query.guardrails.output import SafetyVerdict
+    from app.query.verification import VerificationResult
+
+    async def reject_all(filter_result, passage_texts=None, *, stage=None):
+        claims = [
+            ClaimVerdict(index=i, text=t, markers=m, supported=False, reason="not in passage")
+            for i, (t, m) in enumerate(split_claims(filter_result.answer))
+        ]
+        return VerificationResult(
+            groundedness=GroundednessResult(claims=claims, score=0.0),
+            safety=SafetyVerdict(verdict="pass", reason="ok", source="llm"),
+        )
+
+    fake_llm.replies["query_guardrail"] = '{"safe": true}'
+    fake_llm.replies["query_expansion"] = "[]"
+    monkeypatch.setattr(pipeline, "verify_answer", reject_all)
+
+    body = client.post("/api/query", json={"question": "how did revenue grow?"}).json()
+
+    assert body["citations"] == [] and body["groundedness"]["score"] == 0.0
+    assert [c["reason"] for c in body["removed_claims"]] == ["unsupported"]
+
+
+def test_removed_claims_default_to_empty(client, fake_llm):
+    body = client.post("/api/query", json={"question": "hello there"}).json()
+
+    assert body["removed_claims"] == []

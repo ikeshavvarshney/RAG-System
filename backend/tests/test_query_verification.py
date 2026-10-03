@@ -258,3 +258,28 @@ def test_stage_event_is_emitted(fake_llm):
     _verify(_filtered(ANSWER), stage=stage)
 
     assert events == ["verification"]
+
+
+@pytest.mark.parametrize(
+    "filtered",
+    [
+        CitationFilterResult(answer=NOT_IN_CONTEXT, is_non_answer=True),
+        CitationFilterResult(answer="## Overview\n\nIn summary:"),
+    ],
+)
+def test_skipped_verification_has_a_null_score_not_zero(fake_llm, filtered):
+    result = _verify(filtered)
+
+    assert fake_llm.calls == []
+    assert result.groundedness.score is None and result.groundedness.claims == []
+
+
+def test_real_scores_stay_floats_including_zero(fake_llm):
+    fake_llm.replies[STAGE] = _reply(supported=(False, False, False))
+
+    zero = _verify(_filtered(ANSWER)).groundedness.score
+    fake_llm.replies[STAGE] = _reply()
+    full = _verify(_filtered(ANSWER)).groundedness.score
+
+    assert zero == 0.0 and isinstance(zero, float)
+    assert full == 1.0 and isinstance(full, float)

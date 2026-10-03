@@ -194,8 +194,7 @@ def _summary(body: dict) -> dict:
         "resolved_question": body["resolved_question"],
         "groundedness": body["groundedness"]["score"] if body["groundedness"] else None,
         "safety": f"{body['safety']['verdict']} ({body['safety']['reason']})" if body["safety"] else "n/a",
-        # The API response carries no removed_claims field, so unsupported claims stand in for them.
-        "removed_claims": [c["text"] for c in (body["groundedness"] or {}).get("claims", []) if not c["supported"]],
+        "removed_claims": [f"{c['reason']}: {c['text']}" for c in body.get("removed_claims", [])],
         "usage": {"total_tokens": body["usage"]["total_tokens"], "by_stage": {k: v["total_tokens"] for k, v in body["usage"]["by_stage"].items()}},
     }
 
