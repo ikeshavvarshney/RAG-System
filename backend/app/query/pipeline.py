@@ -13,6 +13,7 @@ from app.query import cache
 from app.query.decomposition import decompose
 from app.query.expansion import expand_query
 from app.query.fusion import Candidate, fuse
+from app.query.generation import GenerationResult, generate_answer
 from app.query.greeting import classify_greeting, match_greeting
 from app.query.guardrails.input import check_deterministic, check_llm
 from app.query.history import record_turn, resolve_question
@@ -41,6 +42,7 @@ Stage = Literal[
     "sufficiency",
     "web_search",
     "rerank",
+    "generation",
 ]
 
 
@@ -77,6 +79,7 @@ class QueryResult:
     context: list[Candidate] = field(default_factory=list)
     reranked: bool = False
     sub_queries: list[SubQuery] = field(default_factory=list)
+    generation: GenerationResult | None = None
     response: str | None = None
     answer: str | None = None
     citations: list[Citation] = field(default_factory=list)
@@ -271,8 +274,20 @@ async def run_query(
             vector_store=vector_store,
             keyword_index=keyword_index,
         )
-        record_turn(session_id, sanitized, resolved_question)
-        return QueryResult("retrieved", question, resolved_question, sub_queries=sub_queries)
+        generation = await generate_answer(
+            resolved_question,
+            sub_contexts=[(sub.question, sub.context) for sub in sub_queries],
+            stage=stage,
+        )
+        record_turn(session_id, sanitized, resolved_question, generation.answer)
+        return QueryResult(
+            "retrieved",
+            question,
+            resolved_question,
+            sub_queries=sub_queries,
+            generation=generation,
+            answer=generation.answer,
+        )
 
     ranked = await retrieve_and_rank(
         resolved_question,
@@ -281,11 +296,16 @@ async def run_query(
         vector_store=vector_store,
         keyword_index=keyword_index,
     )
-    record_turn(session_id, sanitized, resolved_question)
+    generation = await generate_answer(
+        resolved_question, ranked.context.passages, stage=stage
+    )
+    record_turn(session_id, sanitized, resolved_question, generation.answer)
     return QueryResult(
         "retrieved",
         question,
         resolved_question,
+        generation=generation,
+        answer=generation.answer,
         retrieval=ranked.retrieval,
         expanded_queries=ranked.expanded_queries,
         fused=ranked.fused,

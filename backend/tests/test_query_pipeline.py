@@ -335,7 +335,7 @@ def test_turn_is_recorded_after_retrieval(fake_llm, corpus):
 
     turns = history._store.turns(SESSION)
     assert [(t.raw_question, t.resolved_question, t.answer_summary) for t in turns] == [
-        ("how did revenue grow?", "how did revenue grow?", None)
+        ("how did revenue grow?", "how did revenue grow?", "Stub answer [1].")
     ]
 
 

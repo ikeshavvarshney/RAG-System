@@ -1,3 +1,4 @@
+import socket
 from collections.abc import Callable
 
 import pytest
@@ -120,3 +121,38 @@ def fresh_query_state(tmp_path, monkeypatch):
     yield
     if cache._cache is not None:
         cache._cache.close()
+
+
+@pytest.fixture(autouse=True)
+def no_real_network(monkeypatch):
+    """Fail loudly if any test resolves a non-local host, even when product code swallows the error."""
+    real_getaddrinfo = socket.getaddrinfo
+    attempts: list[str] = []
+
+    def guarded(host, *args, **kwargs):
+        if str(host).lower() not in {"localhost", "127.0.0.1", "::1", "testserver", ""}:
+            attempts.append(str(host))
+            raise OSError(f"test attempted a real network call to {host!r}")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", guarded)
+    yield
+    if attempts:
+        pytest.fail(f"real network access attempted: {sorted(set(attempts))}", pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def stub_generation(monkeypatch):
+    """Pipeline tests never call the real answer model. test_query_generation imports
+    ``generate_answer`` from app.query.generation directly, so it still exercises the real one."""
+    from app.query import generation, pipeline
+
+    async def _stub(question, passages=None, *, sub_contexts=None, stage=None):
+        _, refs = generation.build_prompt(question, passages, sub_contexts)
+        if not refs:
+            return generation.GenerationResult(answer=generation.NOT_IN_CONTEXT, is_non_answer=True)
+        return generation.GenerationResult(
+            answer="Stub answer [1].", cited_markers=[1], passages=refs
+        )
+
+    monkeypatch.setattr(pipeline, "generate_answer", _stub)
