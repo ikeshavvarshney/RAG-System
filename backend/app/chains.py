@@ -28,6 +28,8 @@ def _ingest_stage(inputs: dict[str, Any]) -> IngestResult:
         corpus_scope=inputs["corpus_scope"],
         vector_store=inputs.get("vector_store"),
         keyword_index=inputs.get("keyword_index"),
+        vision_strict=inputs.get("vision_strict", True),
+        chart_dense_docs=inputs.get("chart_dense_docs", frozenset()),
     )
 
 

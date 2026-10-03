@@ -193,18 +193,15 @@ def test_images_for_vision_is_a_dry_run_bounded_by_the_vision_budget(vision_mock
     assert calls == {"vision": 0, "ocr": 0}
 
 
-def test_images_beyond_the_vision_budget_go_to_ocr(vision_mocks, monkeypatch):
+def test_images_beyond_the_vision_budget_are_left_out_not_sent_to_ocr(vision_mocks, monkeypatch):
     calls, _ = vision_mocks
     monkeypatch.setattr(settings, "MAX_VISION_PAGES", 1)
     content = _docx(lambda d: [_picture(d, _noise_png()) for _ in range(2)])
 
     pieces = docx_extractor.extract(content, "doc.docx")
 
-    assert [(p["location"], p["extraction_method"]) for p in pieces] == [
-        ("embedded_image_1", "vision"),
-        ("embedded_image_2", "ocr"),
-    ]
-    assert calls == {"vision": 1, "ocr": 1}
+    assert [(p["location"], p["extraction_method"]) for p in pieces] == [("embedded_image_1", "vision")]
+    assert calls == {"vision": 1, "ocr": 0}
 
 
 def test_an_image_that_fails_vision_and_ocr_is_dropped_but_the_text_survives(vision_mocks):

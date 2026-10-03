@@ -20,12 +20,6 @@ logger = logging.getLogger(__name__)
 
 _client = GeminiClient()
 
-# --- page-selection heuristic thresholds --------------------------------------
-# A PDF page goes to the vision pass only when it has almost no text layer AND a raster image covers
-# most of it (i.e.
-LOW_TEXT_CHAR_LIMIT = 100
-LARGE_IMAGE_COVERAGE = 0.50
-
 # Shortest model response we will treat as a usable transcription.
 _MIN_USABLE_CHARS = 12
 
@@ -47,6 +41,8 @@ _VISION_PROMPT = (
     "- chart: state the chart type, its title, each axis label with units and "
     "visible range, and every data point or series value you can read.\n"
     "- figure: give a one-paragraph factual caption of what is visibly present.\n"
+    "- If the image is a full page of running text, transcribe only its tables, charts and figures; the text is "
+    "indexed separately.\n"
     "Add no interpretation or commentary beyond what is visible."
 )
 
@@ -71,8 +67,8 @@ class VisionPageCapExceeded(VisionExtractionError):
         self.selected = selected
         self.cap = cap
         super().__init__(
-            f"vision batch would dispatch {selected} pages, over the "
-            f"MAX_VISION_PAGES={cap} hard cap; refusing to proceed"
+            f"vision selection holds {selected} pages, over the MAX_VISION_PAGES={cap} hard cap; refusing to "
+            "proceed. Tighten the thresholds in app/ingestion/vision_select.py, or allow truncation explicitly."
         )
 
 
@@ -91,61 +87,41 @@ class VisionPage:
 
 
 # --------------------------------------------------------------------------- #
-# Page-selection heuristic (used by pdf.py)
-# --------------------------------------------------------------------------- #
-def page_needs_vision(text: str, image_coverage: float) -> bool:
-    """True when a PDF page has very little text AND a large embedded image."""
-    return (
-        len(text.strip()) < LOW_TEXT_CHAR_LIMIT
-        and image_coverage >= LARGE_IMAGE_COVERAGE
-    )
-
-
-# --------------------------------------------------------------------------- #
 # Extraction
 # --------------------------------------------------------------------------- #
 def extract_pages(items: list[VisionPage], *, skip_failures: bool = False) -> list[dict]:
-    """Run the vision pass over a batch, spending MAX_VISION_PAGES as a budget.
+    """Run the vision pass over a batch that selection has already fitted to the cap.
 
-    With ``skip_failures`` an item that fails both vision and OCR is logged and dropped instead of failing the
-    batch, for callers (DOCX) whose other content should survive one bad image.
+    A batch over ``MAX_VISION_PAGES`` is a planning error and raises ``VisionPageCapExceeded``: nothing is silently
+    dropped or sent to OCR to make room. With ``skip_failures`` an item that fails both vision and OCR is logged and
+    dropped instead of failing the batch, for callers (DOCX) whose other content should survive one bad image.
     """
     cap = settings.MAX_VISION_PAGES
     if len(items) > cap:
-        logger.warning(
-            "vision batch of %d pages exceeds MAX_VISION_PAGES=%d; "
-            "pages beyond the cap fall back to OCR",
-            len(items),
-            cap,
-        )
+        raise VisionPageCapExceeded(len(items), cap)
 
     pieces: list[dict] = []
-    for position, item in enumerate(items):
+    for item in items:
         try:
-            if position < cap:
-                pieces.append(
-                    extract_image(
-                        item.image_bytes,
-                        page=item.page,
-                        location=item.location,
-                        mime_type=item.mime_type,
-                    )
+            pieces.append(
+                extract_image(
+                    item.image_bytes,
+                    page=item.page,
+                    location=item.location,
+                    mime_type=item.mime_type,
                 )
-            else:
-                pieces.append(
-                    _ocr_fallback(
-                        item.image_bytes,
-                        item.page,
-                        item.location,
-                        f"over MAX_VISION_PAGES={cap} budget for this file",
-                    )
-                )
+            )
         except VisionExtractionError as exc:
             if not skip_failures:
                 raise
             logger.warning("dropping image (page=%s, location=%s): %s", item.page, item.location, exc)
 
     return pieces
+
+
+def ocr_only(image_bytes: bytes, *, page: int | None = None, location: str | None = None) -> dict:
+    """OCR a scanned page directly (D-17). Local and free, so it never spends the vision budget."""
+    return _ocr_fallback(image_bytes, page, location, "scanned page: no text layer (D-17)")
 
 
 def extract_image(

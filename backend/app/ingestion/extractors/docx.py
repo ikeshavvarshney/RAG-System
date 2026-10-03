@@ -188,14 +188,25 @@ def images_for_vision(content: bytes) -> list[EmbeddedImage]:
 # --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
-def extract(content: bytes, filename: str):
-    """Extract body text, tables and embedded images from a DOCX file."""
+def extract(content: bytes, filename: str, vision_units: set[int] | None = None):
+    """Extract body text, tables and embedded images from a DOCX file.
+
+    ``vision_units`` holds the image numbers the global plan sent to vision. Called without one, the file plans for
+    itself. A kept image the plan left out is not extracted.
+    """
     document = docx.Document(io.BytesIO(content))
     pieces = _text_pieces(document)
 
     plan = _plan_images(document)
     for number, reason in plan.skipped:
         logger.info("%s: embedded image %d skipped (%s)", filename, number, reason)
+    if vision_units is None:
+        vision_units = {i.number for i in plan.kept[: settings.MAX_VISION_PAGES]}
+    chosen = [image for image in plan.kept if image.number in vision_units]
+    for image in plan.kept:
+        if image.number not in vision_units:
+            logger.warning("%s: %s left out of the vision plan; not extracted", filename, image.location)
+    plan.kept = chosen
     if plan.kept:
         # The same vision-then-OCR path as standalone images. One image that fails both must not lose the text.
         pieces.extend(

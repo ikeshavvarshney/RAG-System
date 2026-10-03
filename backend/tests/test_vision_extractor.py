@@ -56,15 +56,8 @@ def vision_cache(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# page-selection heuristic
+# page-selection heuristic: moved to app/ingestion/vision_select.py (see tests/test_vision_select.py)
 # --------------------------------------------------------------------------- #
-def test_page_needs_vision_heuristic():
-    assert vision.page_needs_vision("", 0.9) is True
-    assert vision.page_needs_vision("x" * 5, 0.6) is True
-    assert vision.page_needs_vision("x" * 500, 0.9) is False  # has a text layer
-    assert vision.page_needs_vision("", 0.1) is False  # no large image
-
-
 # --------------------------------------------------------------------------- #
 # vision success -> structured chunk
 # --------------------------------------------------------------------------- #
@@ -175,35 +168,29 @@ def test_rate_limit_pool_exhausted_falls_back_to_ocr(monkeypatch):
 # --------------------------------------------------------------------------- #
 # MAX_VISION_PAGES hard cap
 # --------------------------------------------------------------------------- #
-def test_batch_over_cap_spends_budget_then_falls_back_to_ocr(monkeypatch):
-    """The cap bounds API spend, not how much of the file is read."""
+def test_batch_over_cap_raises_instead_of_sending_overflow_pages_to_ocr(monkeypatch):
+    """Selection fits the batch to the cap beforehand; a batch that still exceeds it is a planning error."""
     monkeypatch.setattr(settings, "MAX_VISION_PAGES", 2)
-
-    calls = {"n": 0}
+    calls = {"vision": 0, "ocr": 0}
 
     def _vision(**kw):
-        calls["n"] += 1
+        calls["vision"] += 1
         return "CONTENT_TYPE: figure\nA plain grey box."
 
+    def _ocr(image):
+        calls["ocr"] += 1
+        return "ocr over budget"
+
     monkeypatch.setattr(vision._client, "generate_vision", _vision)
-    monkeypatch.setattr(vision, "run_ocr", lambda image: "ocr over budget")
-
-    # Distinct colours per page: the vision cache is keyed on image bytes, so
-    # identical pages would collapse into one call and hide the budget count.
+    monkeypatch.setattr(vision, "run_ocr", _ocr)
     colours = ("red", "green", "blue", "yellow", "purple")
-    items = [
-        vision.VisionPage(image_bytes=_png(color=c), page=i)
-        for i, c in enumerate(colours)
-    ]
-    pieces = vision.extract_pages(items)
+    items = [vision.VisionPage(image_bytes=_png(color=c), page=i) for i, c in enumerate(colours)]
 
-    assert len(pieces) == 5
-    assert [p["extraction_method"] for p in pieces] == [
-        "vision", "vision", "ocr", "ocr", "ocr",
-    ]
-    assert calls["n"] == 2  # budget spent exactly once per allowed page
-    assert [p["page"] for p in pieces] == [0, 1, 2, 3, 4]
-    assert pieces[4]["text"] == "ocr over budget"
+    with pytest.raises(vision.VisionPageCapExceeded) as raised:
+        vision.extract_pages(items)
+
+    assert raised.value.selected == 5 and raised.value.cap == 2
+    assert calls == {"vision": 0, "ocr": 0}  # nothing was spent, and nothing was quietly read by OCR
 
 
 def test_pages_within_cap_never_reach_ocr(monkeypatch):
@@ -265,22 +252,18 @@ def test_pipeline_isolates_total_vision_failure_per_file(monkeypatch):
 # --------------------------------------------------------------------------- #
 # pdf.py page-selection integration
 # --------------------------------------------------------------------------- #
-def test_low_text_image_page_goes_to_vision_normal_page_does_not(monkeypatch):
+def test_scanned_image_page_goes_to_ocr_not_vision_and_normal_page_stays_text(monkeypatch):
+    """A page with no text layer and a page-sized image is a scan: OCR (D-17), outside the vision budget."""
     calls = []
-
-    def gen(**kw):
-        calls.append(kw)
-        return "CONTENT_TYPE: figure\nA full-page grey rectangle."
-
-    monkeypatch.setattr(vision._client, "generate_vision", gen)
+    monkeypatch.setattr(vision._client, "generate_vision", lambda **kw: calls.append(kw) or "unused")
+    monkeypatch.setattr(vision, "run_ocr", lambda image: "text read from the scan")
 
     pieces = pdf_extract(_pdf_text_then_image(), "doc.pdf")
     by_page = {p["page"]: p for p in pieces}
 
     assert by_page[1]["extraction_method"] == "text"
-    assert by_page[2]["extraction_method"] == "vision"
-    assert by_page[2]["chunk_type"] == "image_caption"
-    assert len(calls) == 1  # only the image page was dispatched
+    assert by_page[2]["extraction_method"] == "ocr" and by_page[2]["text"] == "text read from the scan"
+    assert calls == []  # the vision model was never called
 
 
 def test_vision_call_uses_minimal_thinking_and_an_output_cap(monkeypatch):

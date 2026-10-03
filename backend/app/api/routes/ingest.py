@@ -22,6 +22,10 @@ router = APIRouter()
 MAX_FILES_PER_REQUEST = 60
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
+# An upload endpoint must not fail because a batch holds more chart pages than the vision budget: it keeps the best
+# pages, records what it dropped, and answers. The ingestion script is the strict path.
+_UPLOAD_VISION_STRICT = False
+
 # File type is not validated here.
 
 
@@ -69,7 +73,9 @@ async def _ingest_upload(files: list[UploadFile], session_id: str | None) -> dic
         file_payloads.append((upload.filename, content))
 
     if session_id is None:
-        result = await ingestion_chain.ainvoke({"files": file_payloads, "corpus_scope": PERSISTENT_SCOPE})
+        result = await ingestion_chain.ainvoke(
+            {"files": file_payloads, "corpus_scope": PERSISTENT_SCOPE, "vision_strict": _UPLOAD_VISION_STRICT}
+        )
     else:
         try:
             validate_issued_session_id(session_id)
@@ -95,6 +101,7 @@ async def _ingest_upload(files: list[UploadFile], session_id: str | None) -> dic
                 "corpus_scope": scope_for(session_id),
                 "vector_store": vector_store,
                 "keyword_index": keyword_index,
+                "vision_strict": _UPLOAD_VISION_STRICT,
             }
         )
 

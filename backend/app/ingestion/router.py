@@ -35,7 +35,7 @@ _EXTRACTOR_MAP = {
 }
 
 
-def route_file(filename: str, content: bytes):
+def route_file(filename: str, content: bytes, vision_units: set[int] | None = None):
     """Detect the real file type and dispatch to the matching extractor."""
     file_type = detect_file_type(filename, content)
     extractor = _EXTRACTOR_MAP.get(file_type)
@@ -43,4 +43,4 @@ def route_file(filename: str, content: bytes):
     if extractor is None:
         raise UnsupportedFileType(filename, detected_type=file_type)
 
-    return extractor(content, filename)
+    return extractor(content, filename, vision_units)

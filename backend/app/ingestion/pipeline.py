@@ -4,6 +4,7 @@ from app.ingestion.chunk_ids import make_chunk_id
 from app.ingestion.indexer import IndexResult, get_keyword_index, get_vector_store, index_chunks
 from app.ingestion.router import UnsupportedFileType, route_file
 from app.ingestion.splitter import split
+from app.ingestion.vision_select import VisionSelection, plan_vision
 from app.shared.keyword_index import KeywordIndex
 from app.shared.vector_store import VectorStore
 
@@ -28,6 +29,7 @@ class IngestResult:
     succeeded: list = field(default_factory=list)
     failed: list = field(default_factory=list)
     index: IndexResult | None = None
+    vision: VisionSelection | None = None
 
 
 def ingest_files(
@@ -36,13 +38,21 @@ def ingest_files(
     *,
     vector_store: VectorStore | None = None,
     keyword_index: KeywordIndex | None = None,
+    vision_strict: bool = True,
+    chart_dense_docs: frozenset[str] | set[str] = frozenset(),
 ) -> IngestResult:
-    """Run every file through routing, extraction, splitting, then indexing."""
+    """Run every file through routing, extraction, splitting, then indexing.
+
+    Vision pages are chosen for the whole batch first, locally, before any model call. With ``vision_strict`` a
+    batch whose plan exceeds ``MAX_VISION_PAGES`` raises ``VisionPageCapExceeded`` at that point; without it the
+    plan is truncated and the dropped pages are recorded in ``result.vision``.
+    """
     result = IngestResult()
+    result.vision = plan_vision(files, strict=vision_strict, chart_dense_docs=chart_dense_docs)
 
     for filename, content in files:
         try:
-            extracted_pieces = route_file(filename, content)
+            extracted_pieces = route_file(filename, content, result.vision.units_for(filename))
         except UnsupportedFileType as exc:
             result.failed.append(FileError(filename=filename, reason=str(exc)))
             continue
