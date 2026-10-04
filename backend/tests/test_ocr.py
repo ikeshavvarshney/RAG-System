@@ -360,3 +360,47 @@ def test_markdown_without_html_survives_untouched():
     text = "# Heading\n\nA paragraph with no markup at all."
 
     assert _html_to_markdown(text) == text
+
+
+# --------------------------------------------------------------------------- #
+# scripts/warm_ocr_models.py
+# --------------------------------------------------------------------------- #
+def _load_warm_script():
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "warm_ocr_models.py"
+    spec = importlib.util.spec_from_file_location("warm_ocr_models_script", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_warm_script_builds_the_same_pipeline_the_app_builds():
+    from app.ingestion.extractors import paddle_ocr
+
+    script = _load_warm_script()
+
+    assert script.STRUCTURE_OPTIONS == paddle_ocr._STRUCTURE_OPTIONS
+
+
+def test_warm_script_draws_a_table_image_without_loading_any_model():
+    image = _load_warm_script().synthetic_table()
+
+    assert image.shape == (300, 520, 3) and image.dtype.name == "uint8" and image.min() == 0 and image.max() == 255
+
+
+def test_warm_script_reports_cached_models_with_sizes(tmp_path, monkeypatch, capsys):
+    script = _load_warm_script()
+    model = tmp_path / "official_models" / "FakeModel"
+    model.mkdir(parents=True)
+    (model / "weights.bin").write_bytes(b"x" * 2048)
+    monkeypatch.setenv("PADDLE_PDX_CACHE_HOME", str(tmp_path))
+
+    models = script.describe_cache()
+    script.print_cache("Cached", models)
+
+    assert models == {str(model): 2048}
+    assert "FakeModel" in capsys.readouterr().out

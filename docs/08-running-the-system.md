@@ -245,6 +245,8 @@ Limits enforced by the endpoint: 60 files per request, 50 MB per file, and `.pdf
 
 `paddle-structure` needs the `[ocr]` extra installed. It is not the default because at 75 seconds per page a full corpus pass takes hours; turn it on for the RQ2 baseline runs that need recovered tables. See D-27 for the measurements behind that choice.
 
+**Warm the structure models once, with network access, before an RQ2 run.** PP-StructureV3 uses 13 models (about 1.1 GB, in `~/.paddlex/official_models/`, never in the repository), and PaddleX creates some of them only on the first table prediction, so the first real table would otherwise try to download mid-run. `python scripts/warm_ocr_models.py` (run it with `backend/.venv`) builds the pipeline, runs one prediction on a synthetic table so those models download too, and prints each cached model's path and size. After that the baseline runs offline: set `HF_HUB_OFFLINE=1` and `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True` to stop PaddleX probing its model hosts at startup.
+
 Note that OCR runs rarely in normal operation. Vision handles figures and scanned pages, so a corpus ingested with a working vision path produces few or no `ocr` passages.
 
 ---
