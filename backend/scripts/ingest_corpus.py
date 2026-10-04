@@ -31,14 +31,24 @@ def print_plan(selection, files, chart_dense) -> None:
     cap = selection.cap
     per_doc = collections.Counter(c.source_doc for c in selection.selected)
     kinds = collections.Counter(c.kind for c in selection.selected)
-    covered_dense = sorted(d for d in per_doc if d in chart_dense)
+    names = {name for name, _ in files}
+    present_dense = chart_dense & names
+    covered_dense = sorted(d for d in per_doc if d in present_dense)
     print(f"Vision plan: {len(selection.selected)} of {cap} pages selected "
           f"({selection.qualified} candidates had a strong signal; {len(selection.dropped)} dropped)")
     print(f"  by kind: {dict(kinds)}")
     print(f"  documents with at least one selected page: {len(per_doc)} of {len(files)}")
-    print(f"  chart-dense documents covered: {len(covered_dense)} of {len(chart_dense)}")
+    print(f"  chart-dense documents covered: {len(covered_dense)} of {len(present_dense)}")
     print(f"  scanned pages routed to OCR (not vision): {len(selection.scanned_to_ocr)} "
           f"in {len({d for d, _ in selection.scanned_to_ocr})} documents")
+    fallback = [c for c in selection.selected if c.fallback]
+    print(f"  fallback pages (chart-dense documents with no normally scored page): {len(fallback)}")
+    for c in fallback:
+        print(f"    {c.source_doc} page {c.label} ({c.reason})")
+    uncovered = sorted(d for d in present_dense if d not in per_doc)
+    print(f"  chart-dense documents still uncovered: {len(uncovered)}")
+    for doc in uncovered:
+        print(f"    {doc}: {selection.notes.get(doc) or 'all of its candidate pages were dropped (see Dropped)'}")
     if selection.selected:
         lowest = min(selection.selected, key=lambda c: (c.score, c.source_doc, c.unit))
         print(f"  lowest-scoring selected page: {lowest.source_doc} {lowest.label} "

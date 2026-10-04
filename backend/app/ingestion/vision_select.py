@@ -53,6 +53,17 @@ DOCX_IMAGE_SCORE = 6.0
 # A candidate needs at least one strong signal.
 MIN_SELECT_SCORE = 3.0
 
+# --- fallback for chart-dense documents ---------------------------------------------------------------------------
+# A chart-dense PDF with no page that scores normally gets its single best page, when that page shows at least one of
+# these weaker signals. A 2x2 table is not one of them: that size is mostly a layout box.
+FALLBACK_MIN_IMAGE_COVERAGE = 0.25
+FALLBACK_MIN_DRAWINGS = 100
+FALLBACK_MIN_TABLE_ROWS = 3
+FALLBACK_MIN_TABLE_COLS = 3
+# Below MIN_SELECT_SCORE, so fallback pages rank after every normal page and are the first dropped under a cap.
+FALLBACK_SCORE = 2.0
+FALLBACK_REASON = "fallback_best_page"
+
 # --- spreading ----------------------------------------------------------------------------------------------------
 # At most this many pages of one document: coverage across documents beats depth in one.
 VISION_MAX_PAGES_PER_DOC = 6
@@ -79,6 +90,7 @@ class VisionCandidate:
     kind: CandidateKind
     score: float
     reason: str
+    fallback: bool = False
 
     @property
     def label(self) -> int | str:
@@ -92,6 +104,7 @@ class VisionCandidate:
 class FileAnalysis:
     candidates: list[VisionCandidate] = field(default_factory=list)
     scanned_pages: list[int] = field(default_factory=list)
+    note: str = ""  # why the file offers nothing to vision, when it does not
 
 
 @dataclass
@@ -102,6 +115,7 @@ class VisionSelection:
     cap: int = 0
     strict: bool = True
     qualified: int = 0  # candidates with a strong signal, before the ceiling and the cap
+    notes: dict[str, str] = field(default_factory=dict)  # source_doc -> why it has no selected page
 
     def units_for(self, source_doc: str) -> set[int]:
         return {c.unit for c in self.selected if c.source_doc == source_doc}
@@ -171,16 +185,53 @@ def score_page(features: PageFeatures, *, chart_dense: bool = False) -> tuple[fl
 # --------------------------------------------------------------------------- #
 # Candidates per file
 # --------------------------------------------------------------------------- #
+def _table_area(features: PageFeatures) -> int:
+    return max((rows * cols for rows, cols in features.tables), default=0)
+
+
+def _has_relaxed_signal(features: PageFeatures) -> bool:
+    return (
+        features.image_coverage >= FALLBACK_MIN_IMAGE_COVERAGE
+        or features.drawings >= FALLBACK_MIN_DRAWINGS
+        or any(r >= FALLBACK_MIN_TABLE_ROWS and c >= FALLBACK_MIN_TABLE_COLS for r, c in features.tables)
+    )
+
+
+def _tie_break_key(page: tuple[int, PageFeatures, float]) -> tuple:
+    number, features, score = page
+    return (-score, -features.drawings, -features.image_coverage, -_table_area(features), number)
+
+
 def analyze_pdf(doc: "pymupdf.Document", filename: str, *, chart_dense: bool = False) -> FileAnalysis:
     analysis = FileAnalysis()
+    scored: list[tuple[int, PageFeatures, float]] = []
     for number, page in enumerate(doc, start=1):
         features = page_features(page)
         if features.is_scanned:
             analysis.scanned_pages.append(number)
             continue
         score, reason = score_page(features, chart_dense=chart_dense)
+        scored.append((number, features, score))
         if score > 0:
             analysis.candidates.append(VisionCandidate(filename, number, "pdf_page", score, reason))
+
+    if any(c.score >= MIN_SELECT_SCORE for c in analysis.candidates):
+        return analysis
+    if not scored:
+        analysis.note = "every page is scanned and goes to OCR" if analysis.scanned_pages else "no pages"
+        return analysis
+
+    best_number, best, _ = min(scored, key=_tie_break_key)
+    if chart_dense and _has_relaxed_signal(best):
+        analysis.candidates.append(
+            VisionCandidate(filename, best_number, "pdf_page", FALLBACK_SCORE, FALLBACK_REASON, fallback=True)
+        )
+    else:
+        tables = ", ".join(f"{r}x{c}" for r, c in best.tables) or "none"
+        analysis.note = (
+            f"no page has a strong or relaxed visual signal (best page {best_number}: {best.text_chars} text chars, "
+            f"image {best.image_coverage:.0%}, {best.drawings} drawings, tables {tables})"
+        )
     return analysis
 
 
@@ -199,12 +250,14 @@ def analyze_file(filename: str, content: bytes, *, chart_dense: bool = False) ->
                 doc.close()
         if file_type == "docx":
             plan = docx_extractor.plan_embedded_images(content)
-            return FileAnalysis(
-                [
-                    VisionCandidate(filename, image.number, "docx_image", DOCX_IMAGE_SCORE, f"embedded image {image.width}x{image.height}")
-                    for image in plan.kept
-                ]
-            )
+            candidates = [
+                VisionCandidate(filename, image.number, "docx_image", DOCX_IMAGE_SCORE, f"embedded image {image.width}x{image.height}")
+                for image in plan.kept
+            ]
+            note = ""
+            if not candidates:
+                note = f"no embedded image kept ({len(plan.skipped)} skipped); tables are extracted as markdown text"
+            return FileAnalysis(candidates, note=note)
         return FileAnalysis([VisionCandidate(filename, 1, "image", STANDALONE_IMAGE_SCORE, "standalone image")])
     except Exception as exc:  # noqa: BLE001 - unsupported or corrupt files fail later, in extraction, with a recorded reason
         logger.info("vision planning skipped %s: %s: %s", filename, type(exc).__name__, exc)
@@ -231,7 +284,7 @@ def select(
     ``VisionPageCapExceeded``: tighten the thresholds above. Without it the best ``cap`` are kept, round-robin across
     documents, and everything left out is recorded in ``dropped``. Nothing is ever sent to OCR to make room.
     """
-    qualified = sorted((c for c in candidates if c.score >= MIN_SELECT_SCORE), key=_rank_key)
+    qualified = sorted((c for c in candidates if c.score >= MIN_SELECT_SCORE or c.fallback), key=_rank_key)
     by_doc: dict[str, list[VisionCandidate]] = defaultdict(list)
     for candidate in qualified:
         by_doc[candidate.source_doc].append(candidate)
@@ -242,20 +295,24 @@ def select(
         kept[doc] = by_doc[doc][:per_doc]
         dropped += [(c, f"per-document ceiling of {per_doc} pages") for c in by_doc[doc][per_doc:]]
 
-    total = sum(len(v) for v in kept.values())
+    normal = {doc: [c for c in pages if not c.fallback] for doc, pages in kept.items()}
+    fallbacks = sorted((c for pages in kept.values() for c in pages if c.fallback), key=_rank_key)
+    total = sum(len(v) for v in normal.values()) + len(fallbacks)
     if total <= cap:
-        chosen = [c for doc in sorted(kept) for c in kept[doc]]
+        chosen = [c for pages in kept.values() for c in pages]
     elif strict:
         raise VisionPageCapExceeded(total, cap)
     else:
+        # Normal pages first, round-robin across documents; fallback pages only take what is left.
         chosen = []
         depth = 0
         while len(chosen) < cap:
-            this_round = sorted((v[depth] for v in kept.values() if len(v) > depth), key=_rank_key)
+            this_round = sorted((v[depth] for v in normal.values() if len(v) > depth), key=_rank_key)
             if not this_round:
                 break
             chosen += this_round[: cap - len(chosen)]
             depth += 1
+        chosen += fallbacks[: max(cap - len(chosen), 0)]
         chosen_set = set(chosen)
         dropped += [(c, f"over the page cap of {cap}") for v in kept.values() for c in v if c not in chosen_set]
 
@@ -274,12 +331,16 @@ def plan_vision(
     """The global plan for one ingest run. Local only: no model, OCR or network call."""
     candidates: list[VisionCandidate] = []
     scanned: list[tuple[str, int]] = []
+    notes: dict[str, str] = {}
     for filename, content in files:
         analysis = analyze_file(filename, content, chart_dense=filename in chart_dense_docs)
         candidates += analysis.candidates
         scanned += [(filename, page) for page in analysis.scanned_pages]
+        if analysis.note:
+            notes[filename] = analysis.note
     selection = select(candidates, cap=settings.MAX_VISION_PAGES if cap is None else cap, strict=strict)
     selection.scanned_to_ocr = scanned
+    selection.notes = notes
     for candidate, why in selection.dropped:
         logger.warning("vision page dropped: %s %s (score %.1f, %s): %s", candidate.source_doc, candidate.label, candidate.score, candidate.reason, why)
     return selection

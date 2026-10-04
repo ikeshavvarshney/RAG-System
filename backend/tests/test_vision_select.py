@@ -376,3 +376,151 @@ def test_the_script_is_strict_by_default_and_truncates_only_when_asked(tmp_path,
     with pytest.raises(SystemExit):
         script.main()
     assert seen["vision_strict"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Fallback: one best page for a chart-dense document with no normally scored page
+# --------------------------------------------------------------------------- #
+def _grid_page(doc, rows: int, cols: int) -> None:
+    page = doc.new_page()
+    left, top, cell_w, cell_h = 50, 100, 100, 28
+    for r in range(rows + 1):
+        page.draw_line((left, top + r * cell_h), (left + cols * cell_w, top + r * cell_h))
+    for c in range(cols + 1):
+        page.draw_line((left + c * cell_w, top), (left + c * cell_w, top + rows * cell_h))
+    for r in range(rows):
+        for c in range(cols):
+            page.insert_text((left + c * cell_w + 6, top + r * cell_h + 18), f"r{r}c{c}", fontsize=9)
+    page.insert_textbox(pymupdf.Rect(50, 300, 550, 700), PROSE, fontsize=10)
+
+
+def _image_beside_text_page(doc) -> None:
+    """Text plus an image covering about 38% of the page: a relaxed signal, not a strong one."""
+    page = doc.new_page()
+    page.insert_image(pymupdf.Rect(30, 60, 565, 420), stream=_noise_png())
+    page.insert_textbox(pymupdf.Rect(50, 440, 550, 800), PROSE, fontsize=10)
+
+
+def _drawings_page(doc) -> None:
+    """150 separate paths: above the fallback bar of 100, below the chart bar of 300."""
+    page = doc.new_page()
+    for i in range(150):
+        page.draw_rect(pymupdf.Rect(40 + (i % 50) * 10, 100 + (i // 50) * 60, 46 + (i % 50) * 10, 150 + (i // 50) * 60), fill=(0.5, 0.5, 0.5))
+    page.insert_textbox(pymupdf.Rect(50, 300, 550, 700), PROSE, fontsize=10)
+
+
+DENSE = frozenset({"doc.pdf"})
+
+
+def test_a_chart_dense_document_with_no_strong_page_gets_exactly_one_fallback_page():
+    content = _pdf(_text_page, _image_beside_text_page, _text_page)
+
+    selection = plan_vision([("doc.pdf", content)], chart_dense_docs=DENSE)
+
+    assert [(c.unit, c.reason, c.fallback) for c in selection.selected] == [(2, "fallback_best_page", True)]
+    assert selection.selected[0].score == vs.FALLBACK_SCORE < vs.MIN_SELECT_SCORE
+
+
+def test_a_document_with_a_strong_page_gets_no_fallback_page():
+    content = _pdf(_table_page, _image_beside_text_page)
+
+    selection = plan_vision([("doc.pdf", content)], chart_dense_docs=DENSE)
+
+    assert [(c.unit, c.fallback) for c in selection.selected] == [(1, False)]
+
+
+def test_a_2x2_table_alone_does_not_qualify_but_a_3x3_table_does():
+    two = plan_vision([("doc.pdf", _pdf(_text_page, lambda d: _grid_page(d, 2, 2)))], chart_dense_docs=DENSE)
+    three = plan_vision([("doc.pdf", _pdf(_text_page, lambda d: _grid_page(d, 3, 3)))], chart_dense_docs=DENSE)
+
+    assert two.selected == [] and "no page has a strong or relaxed visual signal" in two.notes["doc.pdf"]
+    assert [(c.unit, c.fallback) for c in three.selected] == [(2, True)]
+
+
+def test_enough_vector_drawings_qualify_for_the_fallback():
+    selection = plan_vision([("doc.pdf", _pdf(_text_page, _drawings_page))], chart_dense_docs=DENSE)
+
+    assert [(c.unit, c.fallback) for c in selection.selected] == [(2, True)]
+
+
+def test_documents_that_are_not_chart_dense_never_get_a_fallback_page():
+    content = _pdf(_text_page, _image_beside_text_page)
+
+    selection = plan_vision([("doc.pdf", content)], chart_dense_docs=frozenset())
+
+    assert selection.selected == []
+
+
+def test_at_most_one_fallback_page_per_document():
+    content = _pdf(_image_beside_text_page, _image_beside_text_page, _drawings_page)
+
+    selection = plan_vision([("doc.pdf", content)], chart_dense_docs=DENSE)
+
+    assert len(selection.selected) == 1 and selection.selected[0].fallback
+
+
+def test_the_fallback_page_is_the_best_by_the_tie_break_order():
+    content = _pdf(_image_beside_text_page, _drawings_page)  # more drawings beats a larger image
+
+    selection = plan_vision([("doc.pdf", content)], chart_dense_docs=DENSE)
+
+    assert [c.unit for c in selection.selected] == [2]
+
+
+def test_a_scanned_only_document_still_goes_to_ocr_with_no_fallback():
+    selection = plan_vision([("doc.pdf", _pdf(_scanned_page, _scanned_page))], chart_dense_docs=DENSE)
+
+    assert selection.selected == [] and selection.scanned_to_ocr == [("doc.pdf", 1), ("doc.pdf", 2)]
+    assert "scanned" in selection.notes["doc.pdf"]
+
+
+def _fallback(doc: str, unit: int = 1) -> VisionCandidate:
+    return VisionCandidate(doc, unit, "pdf_page", vs.FALLBACK_SCORE, "fallback_best_page", fallback=True)
+
+
+def test_fallback_pages_are_dropped_first_under_truncation():
+    normal = [_candidate(f"n{i}.pdf", 1, 3.5) for i in range(3)]
+    extras = [_fallback("f1.pdf"), _fallback("f2.pdf")]
+
+    exact = select(normal + extras, cap=3, strict=False)
+    one_spare = select(normal + extras, cap=4, strict=False)
+
+    assert [c.source_doc for c in exact.selected] == ["n0.pdf", "n1.pdf", "n2.pdf"]
+    assert [c.source_doc for c, _ in exact.dropped] == ["f1.pdf", "f2.pdf"]
+    assert [c.source_doc for c in one_spare.selected] == ["f1.pdf", "n0.pdf", "n1.pdf", "n2.pdf"]
+    assert [c.source_doc for c, _ in one_spare.dropped] == ["f2.pdf"]
+
+
+def test_a_fallback_page_beats_nothing_but_never_a_second_page_of_a_normal_document():
+    candidates = [_candidate("a.pdf", 1, 5.0), _candidate("a.pdf", 2, 4.0), _fallback("f.pdf")]
+
+    selection = select(candidates, cap=2, strict=False)
+
+    assert [(c.source_doc, c.unit) for c in selection.selected] == [("a.pdf", 1), ("a.pdf", 2)]
+
+
+def test_fallback_pages_count_toward_the_strict_cap():
+    candidates = [_candidate(f"n{i}.pdf", 1, 3.5) for i in range(3)] + [_fallback("f.pdf")]
+
+    with pytest.raises(VisionPageCapExceeded) as raised:
+        select(candidates, cap=3, strict=True)
+
+    assert raised.value.selected == 4
+    assert len(select(candidates, cap=4, strict=True).selected) == 4
+
+
+def test_selection_with_fallback_pages_is_deterministic():
+    files = [
+        ("a.pdf", _pdf(_text_page, _image_beside_text_page)),
+        ("b.pdf", _pdf(_text_page, _drawings_page)),
+        ("c.pdf", _pdf(_table_page)),
+    ]
+    dense = frozenset({"a.pdf", "b.pdf", "c.pdf"})
+
+    first = plan_vision(files, chart_dense_docs=dense)
+    second = plan_vision(list(reversed(files)), chart_dense_docs=dense)
+
+    assert [(c.source_doc, c.unit, c.score, c.fallback) for c in first.selected] == [
+        (c.source_doc, c.unit, c.score, c.fallback) for c in second.selected
+    ]
+    assert [(c.source_doc, c.fallback) for c in first.selected] == [("a.pdf", True), ("b.pdf", True), ("c.pdf", False)]
