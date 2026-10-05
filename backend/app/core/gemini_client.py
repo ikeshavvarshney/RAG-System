@@ -29,6 +29,15 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     return any(marker in blob for marker in _RATE_LIMIT_MARKERS)
 
 
+# A model overloaded server-side: worth a backed-off retry, though not a reason to block the key.
+_TRANSIENT_MARKERS = ("503", "unavailable", "high demand", "overloaded")
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    blob = f"{type(exc).__name__} {exc}".lower()
+    return _is_rate_limit_error(exc) or any(marker in blob for marker in _TRANSIENT_MARKERS)
+
+
 def _is_daily_quota_error(exc: BaseException) -> bool:
     return "perday" in str(exc).lower()
 
@@ -121,7 +130,7 @@ class GeminiClient:
             scope=scope,
             retries=self.max_retries if max_retries is None else max_retries,
             backoff_base=self.backoff_base,
-            is_rate_limited=_is_rate_limit_error,
+            is_rate_limited=_is_retryable_error,
             is_quota_exhausted=_is_daily_quota_error,
             exhausted_block_seconds=_DAILY_QUOTA_BLOCK_SEC,
             label="Gemini",

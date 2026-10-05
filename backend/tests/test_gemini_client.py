@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.core import gemini_client as gc
-from app.core.gemini_client import GeminiClient, _is_rate_limit_error
+from app.core.gemini_client import GeminiClient, _is_rate_limit_error, _is_retryable_error
 from app.core.key_rotation import AllKeysBlocked, KeyRotator
 from app.core.usage import UsageTracker
 
@@ -64,6 +64,30 @@ def test_is_rate_limit_error_recognises_common_shapes(message):
 
 def test_is_rate_limit_error_ignores_unrelated_errors():
     assert not _is_rate_limit_error(ValueError("bad prompt: unsupported content"))
+
+
+def test_overloaded_model_is_retryable_but_not_a_rate_limit():
+    exc = RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+    assert _is_retryable_error(exc)
+    assert not _is_rate_limit_error(exc)
+    assert not _is_retryable_error(ValueError("bad prompt: unsupported content"))
+
+
+def test_generate_retries_after_a_503(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    client = GeminiClient(backoff_base=0)
+
+    ok = MagicMock()
+    ok.text = "recovered"
+    ok.usage_metadata.prompt_token_count = 1
+    ok.usage_metadata.candidates_token_count = 1
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = [
+            RuntimeError("503 UNAVAILABLE"),
+            ok,
+        ]
+        assert client.generate(stage="s", model="m", prompt="p") == "recovered"
 
 
 def test_generate_rotates_key_and_retries_on_rate_limit(monkeypatch):
