@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_ROOT = _REPO_ROOT / "backend"
-_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "CACHE_PATH")
+_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "OCR_CACHE_DIR", "CACHE_PATH")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     MAX_VISION_PAGES: int = 80
     EMBEDDING_CACHE_DIR: str = "./data/cache/embeddings"
     VISION_CACHE_DIR: str = "./data/cache/vision"
+    OCR_CACHE_DIR: str = "./data/cache/ocr"
 
 
     #--- Query pipeline (Week 4) ---

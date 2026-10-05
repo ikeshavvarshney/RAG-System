@@ -58,6 +58,12 @@ def fake_cross_encoder(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_ocr_cache(tmp_path, monkeypatch):
+    """A per-test OCR cache, so one test's result is never served to another."""
+    monkeypatch.setattr(settings, "OCR_CACHE_DIR", str(tmp_path / "ocr-cache"))
+
+
+@pytest.fixture(autouse=True)
 def isolate_index_stores(tmp_path, monkeypatch):
     """Keep every test off the real Gemini API and the real ./data/chroma."""
     from app.ingestion import indexer

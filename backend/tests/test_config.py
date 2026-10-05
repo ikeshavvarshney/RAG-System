@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 
-_PATH_FIELDS = ["CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "CACHE_PATH"]
+_PATH_FIELDS = ["CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "OCR_CACHE_DIR", "CACHE_PATH"]
 
 def test_settings_construct_with_no_env(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEYS", raising=False)

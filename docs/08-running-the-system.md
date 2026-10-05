@@ -261,6 +261,7 @@ Note that OCR runs rarely in normal operation. Vision handles figures and scanne
 |---|---|---|
 | `backend/data/chroma/` | Vector store and keyword index | No |
 | `backend/data/cache/vision/` | Cached vision responses, keyed by image | No |
+| `backend/data/cache/ocr/` | Cached OCR text, keyed by image and OCR settings | No |
 | `backend/data/cache/embeddings/` | Cached embeddings | No |
 | `data/corpus/files/` | Corpus documents | No |
 | `data/corpus/manifest.csv` | Corpus manifest | Yes |
@@ -271,7 +272,7 @@ To start from an empty index, stop the backend and delete the store:
 rm -rf backend/data/chroma
 ```
 
-Leave the caches in place unless you are deliberately re-testing extraction: deleting `backend/data/cache/vision/` means every figure is transcribed again, at full API cost.
+Leave the caches in place unless you are deliberately re-testing extraction: deleting `backend/data/cache/vision/` means every figure is transcribed again, at full API cost. Deleting `backend/data/cache/ocr/` means every scanned page is recognised again, at minutes per page on CPU.
 
 ---
 

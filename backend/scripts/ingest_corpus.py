@@ -12,8 +12,8 @@ rest as dropped.
 
 By default the run stops at the first Gemini API error (after the key rotation's own retries). Without that, a quota
 error inside a vision call would quietly fall back to OCR and the run would carry on, hiding the problem. Pass
---continue-on-api-error to get the old behaviour. To resume after a stop, simply run it again: vision responses and
-embeddings are cached by content hash, so finished work is not paid for twice. OCR is not cached and is redone.
+--continue-on-api-error to get the old behaviour. To resume after a stop, simply run it again: vision responses,
+OCR results and embeddings are cached by content hash, so finished work is not paid for twice.
 
 Exit codes: 0 done, 2 vision plan over the cap, 3 stopped on an API error.
 """
