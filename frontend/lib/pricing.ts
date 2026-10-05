@@ -1,6 +1,6 @@
 import type { UsageEvent } from "@/lib/api";
 
-// USD per million tokens, Gemini API list prices (paid tier) as of September 2026.
+// USD per million tokens, paid-tier Standard prices from ai.google.dev/gemini-api/docs/pricing (updated 2026-10-01).
 const PRICES: Record<string, { input: number; output: number }> = {
   "gemini-3.5-flash": { input: 1.5, output: 9.0 },
   "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
