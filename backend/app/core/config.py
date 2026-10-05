@@ -17,6 +17,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    #---Logging ---
+    LOG_LEVEL: str = "INFO"
+
 #---API key pools (comma-separated strings) ---
     GEMINI_API_KEYS: str =""
     TAVILY_API_KEYS: str =""
