@@ -1,3 +1,5 @@
+import { log, logRequest } from "@/lib/logger";
+
 export const API_BASE_URL: string =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -20,8 +22,24 @@ export function errorMessage(payload: unknown): string | null {
   return typeof error?.message === "string" ? error.message : null;
 }
 
+/** fetch() against the API, logging method, path, status, duration and the backend's request id. */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const startedAt = performance.now();
+  try {
+    const response = await fetch(apiUrl(path), init);
+    logRequest(method, path, response.status, startedAt, response.headers.get("x-request-id"));
+    return response;
+  } catch (error) {
+    if (!init.signal?.aborted) {
+      logRequest(method, path, 0, startedAt, null, { error: String(error) });
+    }
+    throw error;
+  }
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
-  const response = await fetch(apiUrl("/health"), { cache: "no-store" });
+  const response = await apiFetch("/health", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
       `Health check failed: ${response.status} ${response.statusText}`,
@@ -90,7 +108,7 @@ export async function getSessionId(): Promise<string> {
   const stored = readStoredId();
   if (stored) return stored;
 
-  const response = await fetch(apiUrl("/session"), { method: "POST" });
+  const response = await apiFetch("/session", { method: "POST" });
   if (!response.ok) {
     throw new Error(`Could not start a session: ${response.status}`);
   }
@@ -118,7 +136,7 @@ export async function listSessionDocuments(): Promise<SessionDocument[]> {
   const sessionId = currentSessionId();
   if (!sessionId) return [];
 
-  const response = await fetch(apiUrl(`/session/${sessionId}/documents`), {
+  const response = await apiFetch(`/session/${sessionId}/documents`, {
     cache: "no-store",
   });
 
@@ -140,8 +158,8 @@ export async function deleteSessionDocument(sourceDoc: string): Promise<number> 
   const sessionId = currentSessionId();
   if (!sessionId) return 0;
 
-  const response = await fetch(
-    apiUrl(`/session/${sessionId}/documents/${encodeURIComponent(sourceDoc)}`),
+  const response = await apiFetch(
+    `/session/${sessionId}/documents/${encodeURIComponent(sourceDoc)}`,
     { method: "DELETE" },
   );
   if (!response.ok) {
@@ -155,7 +173,7 @@ export async function deleteSession(): Promise<boolean> {
   const sessionId = currentSessionId();
   if (!sessionId) return false;
 
-  const response = await fetch(apiUrl(`/session/${sessionId}`), {
+  const response = await apiFetch(`/session/${sessionId}`, {
     method: "DELETE",
   });
 
@@ -211,6 +229,12 @@ export function ingestFiles(
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", apiUrl("/ingest"));
+    const startedAt = performance.now();
+    const logDone = (status: number, details?: Record<string, unknown>) =>
+      logRequest("POST", "/ingest", status, startedAt, request.getResponseHeader("x-request-id"), {
+        files: files.length,
+        ...details,
+      });
 
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable && onUploadProgress) {
@@ -227,10 +251,17 @@ export function ingestFiles(
       }
 
       if (request.status >= 200 && request.status < 300) {
-        resolve(payload as IngestResponse);
+        const result = payload as IngestResponse;
+        logDone(request.status, {
+          succeeded: result.succeeded.length,
+          failed: result.failed.length,
+          chunks: result.indexed.total,
+        });
+        resolve(result);
         return;
       }
 
+      logDone(request.status, { error: errorMessage(payload) });
       reject(
         new Error(
           errorMessage(payload) ??
@@ -240,9 +271,11 @@ export function ingestFiles(
     });
 
     request.addEventListener("error", () => {
+      logDone(0);
       reject(new Error(`Cannot reach the backend at ${API_BASE_URL}`));
     });
     request.addEventListener("abort", () => {
+      log("info", "POST /ingest cancelled");
       reject(new Error("Upload cancelled"));
     });
 
@@ -345,9 +378,10 @@ export async function streamQuery(
   signal?: AbortSignal,
 ): Promise<QueryResponse> {
   const sessionId = await getSessionId();
+  const startedAt = performance.now();
   let response: Response;
   try {
-    response = await fetch(apiUrl("/query/stream"), {
+    response = await apiFetch("/query/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, session_id: sessionId }),
@@ -364,6 +398,7 @@ export async function streamQuery(
     throw new Error(errorMessage(payload) ?? `Query failed: ${response.status}`);
   }
 
+  const requestId = response.headers.get("x-request-id");
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   for (;;) {
@@ -387,11 +422,22 @@ export async function streamQuery(
 
       if (name === "stage") handlers.onStage?.(payload as StageEvent);
       else if (name === "usage") handlers.onUsage?.(payload as UsageEvent);
-      else if (name === "result") return payload as QueryResponse;
-      else if (name === "error") {
+      else if (name === "result") {
+        const result = payload as QueryResponse;
+        log("info", `query answered in ${Math.round(performance.now() - startedAt)}ms`, {
+          requestId,
+          cacheHit: result.cache_hit,
+          citations: result.citations.length,
+          groundedness: result.groundedness?.score ?? null,
+          tokens: result.usage.total_tokens,
+        });
+        return result;
+      } else if (name === "error") {
+        log("error", "query stream sent an error event", { requestId, ...payload });
         throw new Error(errorMessage({ error: payload }) ?? "The query failed.");
       }
     }
   }
+  log("error", "query stream closed before a result", { requestId });
   throw new Error("The stream closed before an answer arrived.");
 }

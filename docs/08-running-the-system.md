@@ -105,6 +105,8 @@ Serves on http://localhost:3000, with the overview page at `/` and the chat at `
 
 Questions asked in the chat go to `POST /api/query/stream`. While the pipeline runs the chat lists each stage as it starts and finishes; the answer then shows numbered citations (a document and page, or a web URL), a fact-check score, and an expandable breakdown of tokens and estimated cost per stage. The cost uses the Gemini list prices in `frontend/lib/pricing.ts`; update them there if the models or prices change.
 
+**Logs.** The backend logs one line per request (`METHOD path status duration id=<request id>`) and one summary line per answered query, at the level set by `LOG_LEVEL` in `backend/.env` (default `INFO`; health checks log at `DEBUG`). The frontend logs the same request line to the browser console with an `[api]` prefix, at `NEXT_PUBLIC_LOG_LEVEL` in `frontend/.env.local`. Both sides print the same request id (the `X-Request-ID` response header), so a browser line can be matched to its backend line.
+
 **Both services must be running to upload documents or ask questions through the browser.** The backend's CORS policy allows exactly one origin, `FRONTEND_ORIGIN`, which defaults to `http://localhost:3000`. Starting the frontend on a different port (`next dev` will do this automatically if 3000 is taken) causes uploads to fail with a CORS error rather than an obvious one. Either free port 3000 or set `FRONTEND_ORIGIN` in `backend/.env` to match.
 
 Production build:
