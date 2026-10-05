@@ -127,6 +127,10 @@ Output quality at this stage is expected to be rough. Refinement occurs in Week 
 
 This scenario set doubles as the demonstration script for Week 8, so completing all of them cleanly has value beyond verification.
 
+**Status:** implemented, covered by tests, and verified live. Answers are generated with inline citations (one synthesized answer for decomposed questions), filtered structurally, checked for groundedness and safety in one model call, and passed through a deterministic output guardrail; cache write-back skips web-sourced answers. `POST /api/query` and `POST /api/query/stream` (SSE, see [observability.md](observability.md)) share one response schema and one error body. All ten scenarios plus a streaming run passed against the real corpus on 2026-10-03 ([week6_e2e_report.md](week6_e2e_report.md)), with one substitution: the corpus held no table chunks, so the table scenario was answered from a chart. Gemini 503 "high demand" responses are now retried with backoff instead of failing the query. The frontend chat is connected through the stream: it shows live stage progress, the answer with numbered citations marked as document (with page) or web (with URL), the fact-check score, and per-stage token usage with estimated cost (FRONTEND-02 to FRONTEND-05).
+
+Open before Week 7: a table-dependent question still needs a run once the corpus is re-ingested with the new vision page selection, and the generation model is `gemini-3.5-flash` because the key has no Pro access.
+
 ---
 
 ### Week 7. Evaluation and Ablation Studies

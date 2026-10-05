@@ -103,7 +103,9 @@ npm run dev
 
 Serves on http://localhost:3000, with the overview page at `/` and the chat at `/chat`.
 
-**Both services must be running to upload documents through the browser.** The backend's CORS policy allows exactly one origin, `FRONTEND_ORIGIN`, which defaults to `http://localhost:3000`. Starting the frontend on a different port (`next dev` will do this automatically if 3000 is taken) causes uploads to fail with a CORS error rather than an obvious one. Either free port 3000 or set `FRONTEND_ORIGIN` in `backend/.env` to match.
+Questions asked in the chat go to `POST /api/query/stream`. While the pipeline runs the chat lists each stage as it starts and finishes; the answer then shows numbered citations (a document and page, or a web URL), a fact-check score, and an expandable breakdown of tokens and estimated cost per stage. The cost uses the Gemini list prices in `frontend/lib/pricing.ts`; update them there if the models or prices change.
+
+**Both services must be running to upload documents or ask questions through the browser.** The backend's CORS policy allows exactly one origin, `FRONTEND_ORIGIN`, which defaults to `http://localhost:3000`. Starting the frontend on a different port (`next dev` will do this automatically if 3000 is taken) causes uploads to fail with a CORS error rather than an obvious one. Either free port 3000 or set `FRONTEND_ORIGIN` in `backend/.env` to match.
 
 Production build:
 
