@@ -42,6 +42,12 @@ def _is_daily_quota_error(exc: BaseException) -> bool:
     return "perday" in str(exc).lower()
 
 
+def _billed_output_tokens(usage) -> int:
+    # Gemini bills thinking tokens at the output rate, but reports them apart from the candidates.
+    thoughts = getattr(usage, "thoughts_token_count", None)
+    return (usage.candidates_token_count or 0) + (thoughts if isinstance(thoughts, int) else 0)
+
+
 def minimal_thinking_config(max_output_tokens: int | None = None) -> types.GenerateContentConfig:
     # MINIMAL, not budget 0: the Lite models reject a zero budget.
     return types.GenerateContentConfig(
@@ -154,7 +160,7 @@ class GeminiClient:
                 stage=stage,
                 model=model,
                 prompt_tokens=usage.prompt_token_count,
-                output_tokens=usage.candidates_token_count,
+                output_tokens=_billed_output_tokens(usage),
             )
             return response.text
 
@@ -190,7 +196,7 @@ class GeminiClient:
                     stage=stage,
                     model=model,
                     prompt_tokens=usage.prompt_token_count or 0,
-                    output_tokens=usage.candidates_token_count or 0,
+                    output_tokens=_billed_output_tokens(usage),
                 )
             return response.text or ""
 

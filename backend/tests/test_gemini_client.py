@@ -27,6 +27,22 @@ def test_generate_records_usage_from_response_metadata():
     assert tracker.by_stage() == {"test_stage": 15}
 
 
+def test_generate_counts_thinking_tokens_as_output():
+    tracker = UsageTracker()
+    client = GeminiClient(tracker=tracker)
+
+    mock_response = MagicMock()
+    mock_response.usage_metadata.prompt_token_count = 10
+    mock_response.usage_metadata.candidates_token_count = 5
+    mock_response.usage_metadata.thoughts_token_count = 40
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.return_value = mock_response
+        client.generate(stage="s", model="m", prompt="hi")
+
+    assert tracker.total_tokens() == 55
+
+
 def test_multiple_calls_sum_correctly_by_stage():
     tracker = UsageTracker()
     client = GeminiClient(tracker=tracker)
