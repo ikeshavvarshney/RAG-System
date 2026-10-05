@@ -13,6 +13,13 @@ export function apiUrl(path: string): string {
   return `${base}/api${suffix}`;
 }
 
+/** The readable message from the backend's `{"error": {"message"}}` body. */
+export function errorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const error = (payload as { error?: { message?: unknown } }).error;
+  return typeof error?.message === "string" ? error.message : null;
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
   const response = await fetch(apiUrl("/health"), { cache: "no-store" });
   if (!response.ok) {
@@ -224,12 +231,12 @@ export function ingestFiles(
         return;
       }
 
-      // FastAPI puts the readable message in `detail`.
-      const detail =
-        payload && typeof payload === "object" && "detail" in payload
-          ? String((payload as { detail: unknown }).detail)
-          : `${request.status} ${request.statusText || "request failed"}`;
-      reject(new Error(detail));
+      reject(
+        new Error(
+          errorMessage(payload) ??
+            `${request.status} ${request.statusText || "request failed"}`,
+        ),
+      );
     });
 
     request.addEventListener("error", () => {
@@ -241,4 +248,150 @@ export function ingestFiles(
 
     request.send(body);
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Query                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface CorpusCitation {
+  kind: "corpus";
+  source_doc: string;
+  page: number | null;
+  chunk_id: string;
+  score: number | null;
+  snippet: string;
+}
+
+export interface WebCitation {
+  kind: "web";
+  source_url: string;
+  title: string;
+  score: number | null;
+  snippet: string;
+}
+
+export type Citation = CorpusCitation | WebCitation;
+
+export interface StageTiming {
+  stage: string;
+  status: "completed" | "failed";
+  duration_ms: number | null;
+  sub_question: number | null;
+}
+
+export interface StageUsage {
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface UsageSummary extends StageUsage {
+  by_stage: Record<string, StageUsage>;
+}
+
+export interface ClaimVerdict {
+  index: number;
+  text: string;
+  markers: number[];
+  supported: boolean;
+  reason: string;
+}
+
+export interface QueryResponse {
+  session_id: string;
+  answer: string;
+  citations: Citation[];
+  stages: StageTiming[];
+  cache_hit: boolean;
+  decomposed: boolean;
+  sub_questions: string[] | null;
+  raw_question: string;
+  resolved_question: string;
+  usage: UsageSummary;
+  groundedness: { claims: ClaimVerdict[]; score: number | null } | null;
+  safety: {
+    verdict: "pass" | "fail";
+    reason: string;
+    source: "deterministic" | "llm";
+  } | null;
+  removed_claims: { text: string; reason: string }[];
+}
+
+export interface StageEvent {
+  stage: string;
+  status: "started" | "completed" | "failed";
+  duration_ms?: number;
+  sub_question?: number;
+}
+
+export interface UsageEvent {
+  stage: string;
+  model: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface QueryHandlers {
+  onStage?: (event: StageEvent) => void;
+  onUsage?: (event: UsageEvent) => void;
+}
+
+/** Ask a question over the SSE endpoint. Resolves with the terminal `result`. */
+export async function streamQuery(
+  question: string,
+  handlers: QueryHandlers = {},
+  signal?: AbortSignal,
+): Promise<QueryResponse> {
+  const sessionId = await getSessionId();
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/query/stream"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, session_id: sessionId }),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`Cannot reach the backend at ${API_BASE_URL}`);
+  }
+
+  if (!response.ok || !response.body) {
+    const payload: unknown = await response.json().catch(() => null);
+    if (response.status === 400) writeStoredId(null);
+    throw new Error(errorMessage(payload) ?? `Query failed: ${response.status}`);
+  }
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value.replace(/\r\n/g, "\n");
+
+    let boundary: number;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+
+      let name = "message";
+      const data: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (data.length === 0) continue;
+      const payload = JSON.parse(data.join("\n"));
+
+      if (name === "stage") handlers.onStage?.(payload as StageEvent);
+      else if (name === "usage") handlers.onUsage?.(payload as UsageEvent);
+      else if (name === "result") return payload as QueryResponse;
+      else if (name === "error") {
+        throw new Error(errorMessage({ error: payload }) ?? "The query failed.");
+      }
+    }
+  }
+  throw new Error("The stream closed before an answer arrived.");
 }
