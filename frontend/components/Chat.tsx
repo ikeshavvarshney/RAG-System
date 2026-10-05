@@ -1,20 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import AnswerCard, { type AnswerState } from "@/components/AnswerCard";
 import FileUpload from "@/components/FileUpload";
-import { checkHealth, type IngestResponse } from "@/lib/api";
+import { applyStageEvent } from "@/components/StageProgress";
+import { streamQuery, type IngestResponse } from "@/lib/api";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-}
+type Message =
+  | { id: string; role: "user" | "assistant"; content: string }
+  | { id: string; role: "answer"; state: AnswerState };
 
 const GREETING: Message = {
   id: "greeting",
   role: "assistant",
   content:
-    "Upload documents above to index them. Retrieval is not wired up yet, so I cannot answer from them yet; ask anything and I will report live backend status instead.",
+    "Ask a question about the indexed documents. Answers cite the document and page, or the web page, they came from. Documents uploaded to this session are searched too.",
 };
 
 export default function Chat() {
@@ -23,6 +23,9 @@ export default function Chat() {
   const [pending, setPending] = useState(false);
   const [showUpload, setShowUpload] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,25 +61,47 @@ export default function Chat() {
     const text = input.trim();
     if (!text || pending) return;
 
+    const answerId = crypto.randomUUID();
     setMessages((prev) => [
       ...prev,
       { id: crypto.randomUUID(), role: "user", content: text },
+      { id: answerId, role: "answer", state: { stages: [], usage: [] } },
     ]);
     setInput("");
     setPending(true);
 
-    let reply: string;
-    try {
-      const health = await checkHealth();
-      reply = `Backend reachable (status ${health.status}, version ${health.version}). The retrieval pipeline is not connected yet, so I cannot answer "${text}".`;
-    } catch (error) {
-      reply = `Backend unreachable: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
+    const update = (change: (state: AnswerState) => AnswerState) =>
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === answerId && message.role === "answer"
+            ? { ...message, state: change(message.state) }
+            : message,
+        ),
+      );
 
-    say(reply);
-    setPending(false);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const result = await streamQuery(
+        text,
+        {
+          onStage: (event) =>
+            update((state) => ({ ...state, stages: applyStageEvent(state.stages, event) })),
+          onUsage: (event) =>
+            update((state) => ({ ...state, usage: [...state.usage, event] })),
+        },
+        controller.signal,
+      );
+      update((state) => ({ ...state, result }));
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      update((state) => ({
+        ...state,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -95,28 +120,27 @@ export default function Chat() {
       {showUpload && <FileUpload onIngested={handleIngested} />}
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-6">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+        {messages.map((message) =>
+          message.role === "answer" ? (
+            <div key={message.id} className="flex justify-start">
+              <AnswerCard state={message.state} />
+            </div>
+          ) : (
             <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm leading-relaxed ${
-                message.role === "user"
-                  ? "bg-neutral-900 text-white"
-                  : "bg-neutral-100 text-neutral-800"
-              }`}
+              key={message.id}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {message.content}
+              <div
+                className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm leading-relaxed ${
+                  message.role === "user"
+                    ? "bg-neutral-900 text-white"
+                    : "bg-neutral-100 text-neutral-800"
+                }`}
+              >
+                {message.content}
+              </div>
             </div>
-          </div>
-        ))}
-        {pending && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl bg-neutral-100 px-4 py-2 text-sm text-neutral-500">
-              thinking...
-            </div>
-          </div>
+          ),
         )}
         <div ref={bottomRef} />
       </div>
