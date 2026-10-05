@@ -1,3 +1,4 @@
+import Citations, { AnswerBadges, AnswerText, QuestionNotes } from "@/components/Citations";
 import StageProgress, { type StageRow } from "@/components/StageProgress";
 import type { QueryResponse, UsageEvent } from "@/lib/api";
 
@@ -8,7 +9,7 @@ export interface AnswerState {
   error?: string;
 }
 
-export default function AnswerCard({ state }: { state: AnswerState }) {
+export default function AnswerCard({ id, state }: { id: string; state: AnswerState }) {
   const { stages, result, error } = state;
   const running = !result && !error;
 
@@ -25,7 +26,10 @@ export default function AnswerCard({ state }: { state: AnswerState }) {
 
       {result && (
         <>
-          <p className="whitespace-pre-wrap">{result.answer}</p>
+          <QuestionNotes result={result} />
+          <AnswerText text={result.answer} anchor={`cite-${id}`} />
+          <AnswerBadges result={result} />
+          <Citations citations={result.citations} anchor={`cite-${id}`} />
           {stages.length > 0 && (
             <details className="mt-3 border-t border-neutral-200 pt-2">
               <summary className="cursor-pointer text-xs text-neutral-500">

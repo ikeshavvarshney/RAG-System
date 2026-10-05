@@ -123,7 +123,7 @@ export default function Chat() {
         {messages.map((message) =>
           message.role === "answer" ? (
             <div key={message.id} className="flex justify-start">
-              <AnswerCard state={message.state} />
+              <AnswerCard id={message.id} state={message.state} />
             </div>
           ) : (
             <div
