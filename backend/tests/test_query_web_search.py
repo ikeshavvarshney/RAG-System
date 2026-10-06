@@ -253,3 +253,12 @@ def test_each_request_is_counted_in_usage(tavily):
 
     assert web_search.tracker.request_count("web_search") == 1
     assert web_search.tracker.total_tokens() == 0
+
+
+def test_usage_label_carries_the_search_depth(tavily, monkeypatch):
+    monkeypatch.setattr(settings, "WEB_SEARCH_DEPTH", "advanced")
+    tavily.script["k1"] = [{"results": [_item()]}]
+
+    _search()
+
+    assert [entry.model for entry in web_search.tracker._entries] == ["tavily-advanced"]

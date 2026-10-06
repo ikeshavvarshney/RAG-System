@@ -35,7 +35,7 @@ The client reads it with a streaming `fetch`, not `EventSource` (which cannot PO
 | `event:` | When | `data` fields |
 |---|---|---|
 | `stage` | A stage starts, completes, or fails | `stage` (name), `status` (`started` / `completed` / `failed`), `duration_ms` (absent on `started`), `sub_question` (zero-based index; present only for the per-sub-question stages of a decomposed query) |
-| `usage` | A model call is recorded | `stage` (model-call name, e.g. `query_generation`), `model`, `prompt_tokens`, `output_tokens`, `total_tokens` |
+| `usage` | A model call is recorded | `stage` (model-call name, e.g. `query_generation`), `model`, `prompt_tokens`, `output_tokens`, `total_tokens`. A web search is reported the same way with `stage` `web_search`, `model` `tavily-<search depth>` and zero tokens, since Tavily bills per request by depth |
 | `result` | Terminal, success | The full `QueryResponse` (same body as `POST /api/query`), whose `usage` field carries the total and the per-stage breakdown |
 | `error` | Terminal, failure | `code` (`internal_error`), `message` (generic; never a stack trace) |
 

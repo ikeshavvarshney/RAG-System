@@ -6,6 +6,7 @@ interface Row {
   models: Set<string>;
   prompt: number;
   output: number;
+  calls: number;
   cost: number;
   unpriced: boolean;
 }
@@ -18,6 +19,7 @@ function group(events: UsageEvent[]): Row[] {
       models: new Set<string>(),
       prompt: 0,
       output: 0,
+      calls: 0,
       cost: 0,
       unpriced: false,
     };
@@ -25,6 +27,7 @@ function group(events: UsageEvent[]): Row[] {
     row.models.add(event.model);
     row.prompt += event.prompt_tokens;
     row.output += event.output_tokens;
+    row.calls += 1;
     row.cost += cost ?? 0;
     row.unpriced ||= cost === null;
     rows.set(event.stage, row);
@@ -60,15 +63,23 @@ export default function UsagePanel({ events }: { events: UsageEvent[] }) {
           {rows.map((row) => (
             <tr key={row.stage} title={[...row.models].join(", ")}>
               <td>{row.stage.replace(/^query_/, "").replace(/_/g, " ")}</td>
-              <td className="text-right">{number.format(row.prompt)}</td>
-              <td className="text-right">{number.format(row.output)}</td>
+              {row.prompt + row.output === 0 ? (
+                <td colSpan={2} className="text-right">
+                  {row.calls} {row.calls === 1 ? "request" : "requests"}
+                </td>
+              ) : (
+                <>
+                  <td className="text-right">{number.format(row.prompt)}</td>
+                  <td className="text-right">{number.format(row.output)}</td>
+                </>
+              )}
               <td className="text-right">{row.unpriced ? "n/a" : formatCost(row.cost)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <p className="mt-1 text-[11px] text-neutral-400">
-        Estimated from Gemini list prices; web search is not included.
+        Estimated from Gemini list prices and the Tavily pay-as-you-go rate per search.
       </p>
     </details>
   );
