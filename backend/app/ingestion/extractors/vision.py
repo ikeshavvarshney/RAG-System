@@ -7,13 +7,14 @@ import io
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
 from app.core.config import settings
-from app.core.gemini_client import GeminiClient, minimal_thinking_config
+from app.core.gemini_client import VISION_SLOW_CALL_WARN_SEC, GeminiClient, minimal_thinking_config
 from app.ingestion.extractors.ocr import OCRUnavailable, run_ocr
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class VisionPage:
     page: int | None = None
     location: str | None = None
     mime_type: str = "image/png"
+    source_doc: str | None = None  # only for the log
 
 
 # --------------------------------------------------------------------------- #
@@ -109,6 +111,7 @@ def extract_pages(items: list[VisionPage], *, skip_failures: bool = False) -> li
                     page=item.page,
                     location=item.location,
                     mime_type=item.mime_type,
+                    source_doc=item.source_doc,
                 )
             )
         except VisionExtractionError as exc:
@@ -130,6 +133,7 @@ def extract_image(
     page: int | None = None,
     location: str | None = None,
     mime_type: str = "image/png",
+    source_doc: str | None = None,
 ) -> dict:
     """Transcribe one image, falling back to OCR."""
     model_id = settings.VISION_MODEL
@@ -145,6 +149,12 @@ def extract_image(
 
     raw: str | None = None
     fail_reason: str | None = None
+    unit = f"page {page}" if page is not None else (location or "image")
+    label = f"{source_doc or 'unknown document'} {unit}"
+    retries_before = sum(_client.transient_retries.values())
+    logger.info("vision call start: %s, payload %d bytes", label, len(image_bytes))
+    started = time.perf_counter()
+    outcome = "ok"
     try:
         raw = _client.generate_vision(
             stage="vision_extraction",
@@ -157,6 +167,16 @@ def extract_image(
         )
     except Exception as exc:  # includes rate-limit pool exhausted (re-raised)
         fail_reason = f"vision call failed: {type(exc).__name__}: {exc}"
+        outcome = f"failed ({type(exc).__name__})"
+    finally:
+        seconds = time.perf_counter() - started
+        retries = sum(_client.transient_retries.values()) - retries_before
+        logger.info("vision call done: %s in %.1fs, %d retries, %s", label, seconds, retries, outcome)
+        if seconds > VISION_SLOW_CALL_WARN_SEC:
+            logger.warning(
+                "slow vision call: %s took %.1fs (warning above %.0fs), %d retries",
+                label, seconds, VISION_SLOW_CALL_WARN_SEC, retries,
+            )
 
     if raw is not None:
         try:

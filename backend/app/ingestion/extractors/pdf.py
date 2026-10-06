@@ -38,7 +38,8 @@ def extract(content: bytes, filename: str, vision_units: set[int] | None = None)
             if wants_vision:
                 vision_queue.append(
                     vision.VisionPage(
-                        image_bytes=_render_page_png(page), page=page_number, mime_type="image/png"
+                        image_bytes=_render_page_png(page), page=page_number, mime_type="image/png",
+                        source_doc=filename,
                     )
                 )
             # A near-empty page that went to vision is represented by the vision piece alone; every other page

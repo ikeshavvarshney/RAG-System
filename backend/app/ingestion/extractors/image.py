@@ -15,7 +15,7 @@ def extract(content: bytes, filename: str, vision_units: set[int] | None = None)
         logger.warning("%s: image left out of the vision plan; not extracted", filename)
         return []
     piece = vision.extract_image(
-        content, page=None, location=None, mime_type=_mime_for(content)
+        content, page=None, location=None, mime_type=_mime_for(content), source_doc=filename
     )
     if not piece["text"].strip():
         return []

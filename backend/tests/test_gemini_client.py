@@ -375,11 +375,14 @@ def test_text_client_is_built_with_a_request_timeout_that_covers_connect():
     assert options is _TEXT_HTTP_OPTIONS and options.timeout == 120_000
 
 
-def test_vision_client_keeps_its_own_request_timeout_and_single_attempt():
-    from app.core.gemini_client import _VISION_HTTP_OPTIONS
+def test_vision_client_is_bounded_with_a_connect_limit_a_call_limit_and_a_single_attempt():
+    from app.core.gemini_client import (
+        VISION_CALL_TIMEOUT_SEC,
+        VISION_CONNECT_TIMEOUT_SEC,
+        BoundedHttpClient,
+    )
 
-    tracker = UsageTracker()
-    client = GeminiClient(tracker=tracker)
+    client = GeminiClient(tracker=UsageTracker())
     response = MagicMock()
     response.text = "caption"
     response.usage_metadata.prompt_token_count = 1
@@ -389,9 +392,11 @@ def test_vision_client_keeps_its_own_request_timeout_and_single_attempt():
         mock_client_cls.return_value.models.generate_content.return_value = response
         client.generate_vision("v", "m", "describe", b"img", "image/png")
 
-    assert mock_client_cls.call_args.kwargs["http_options"] is _VISION_HTTP_OPTIONS
-    assert _VISION_HTTP_OPTIONS.timeout == 60_000
-    assert _VISION_HTTP_OPTIONS.retry_options.attempts == 1
+    options = mock_client_cls.call_args.kwargs["http_options"]
+    assert options.timeout == int(VISION_CALL_TIMEOUT_SEC * 1000) and options.retry_options.attempts == 1
+    assert isinstance(options.httpx_client, BoundedHttpClient)
+    bounds = options.httpx_client._bounds
+    assert (bounds.connect, bounds.read, bounds.write) == (VISION_CONNECT_TIMEOUT_SEC, VISION_CALL_TIMEOUT_SEC, VISION_CALL_TIMEOUT_SEC)
 
 
 def test_reranker_load_time_includes_the_import(monkeypatch, caplog):

@@ -123,6 +123,11 @@ def fresh_query_state(tmp_path, monkeypatch):
         cache._cache.close()
 
 
+# Non-routable addresses (RFC 1918 space nothing answers on): stall tests aim at them to prove a timeout fires. A
+# connection attempt to one can never reach a real service.
+BLACKHOLE_HOSTS = {"10.255.255.1", "10.255.255.2", "10.255.255.3"}
+
+
 @pytest.fixture(autouse=True)
 def no_real_network(monkeypatch):
     """Fail loudly if any test resolves a non-local host, even when product code swallows the error."""
@@ -130,7 +135,7 @@ def no_real_network(monkeypatch):
     attempts: list[str] = []
 
     def guarded(host, *args, **kwargs):
-        if str(host).lower() not in {"localhost", "127.0.0.1", "::1", "testserver", ""}:
+        if str(host).lower() not in {"localhost", "127.0.0.1", "::1", "testserver", "", *BLACKHOLE_HOSTS}:
             attempts.append(str(host))
             raise OSError(f"test attempted a real network call to {host!r}")
         return real_getaddrinfo(host, *args, **kwargs)
@@ -201,3 +206,21 @@ def stub_cache_embedding(monkeypatch):
     from app.query import cache
 
     monkeypatch.setattr(cache, "embed_queries", lambda texts: [_hash_vector(t) for t in texts])
+
+
+@pytest.fixture(autouse=True)
+def fresh_vision_clients():
+    """The shared vision client keeps one SDK client per API key; no test may inherit another's."""
+    from app.ingestion.extractors import vision
+
+    def clear():
+        for _, http in list(vision._client._vision_clients.values()):
+            try:
+                http.close()
+            except Exception:  # noqa: BLE001
+                pass
+        vision._client._vision_clients.clear()
+
+    clear()
+    yield
+    clear()

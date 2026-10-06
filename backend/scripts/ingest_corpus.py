@@ -10,12 +10,19 @@ The vision cap is MAX_VISION_PAGES. By default a plan over the cap is an error: 
 app/ingestion/vision_select.py. --allow-truncation keeps the best pages, spread across documents, and reports the
 rest as dropped.
 
-By default the run stops at the first Gemini API error (after the key rotation's own retries). Without that, a quota
+A vision call that hits a dropped connection or an HTTP 5xx is retried 3 times (2 s, 5 s, 10 s; see
+TRANSIENT_RETRY_DELAYS_SEC) before it counts as an error; the retries are reported in the summary. Quota, rate-limit
+and auth errors are never retried. By default the run stops at the first Gemini API error (after the key
+rotation's own retries). Without that, a quota
 error inside a vision call would quietly fall back to OCR and the run would carry on, hiding the problem. Pass
 --continue-on-api-error to get the old behaviour. To resume after a stop, simply run it again: vision responses and
 embeddings are cached by content hash, so finished work is not paid for twice. OCR is not cached and is redone.
 
-Exit codes: 0 done, 2 vision plan over the cap, 3 stopped on an API error.
+--max-units N is for a canary run: it stops cleanly, before the (N+1)th uncached vision call, so exactly N paid
+calls are made. Units already in the vision cache cost nothing and do not count. Nothing is indexed on such a stop;
+the N responses stay in the vision cache for the full run.
+
+Exit codes: 0 done (or a clean --max-units stop), 2 vision plan over the cap, 3 stopped on an API error.
 """
 
 import argparse
@@ -35,6 +42,7 @@ from app.ingestion import embedder  # noqa: E402
 from app.ingestion.extractors import vision  # noqa: E402
 from app.ingestion.extractors.vision import VisionPageCapExceeded  # noqa: E402
 from app.ingestion.pipeline import ingest_files  # noqa: E402
+from app.core.gemini_client import is_transient_error  # noqa: E402
 from app.ingestion.vision_select import load_chart_dense, plan_vision  # noqa: E402
 from app.shared.session_store import PERSISTENT_SCOPE  # noqa: E402
 
@@ -46,11 +54,17 @@ class ApiErrorStop(BaseException):
     """A BaseException so no `except Exception` fallback inside the pipeline can swallow it."""
 
 
+class UnitLimitReached(BaseException):
+    """--max-units was reached. A BaseException for the same reason as ApiErrorStop."""
+
+
 class RunMonitor:
     """Counts the run's model calls and OCR time, collects fallback reasons, and can stop at the first API error."""
 
-    def __init__(self, stop_on_error: bool) -> None:
+    def __init__(self, stop_on_error: bool, max_units: int | None = None) -> None:
         self.stop_on_error = stop_on_error
+        self.max_units = max_units
+        self._vision_level: int | None = None
         self.vision_calls = 0
         self.vision_seconds = 0.0
         self.embed_calls = 0
@@ -59,6 +73,7 @@ class RunMonitor:
         self.ocr_seconds: list[float] = []
         self.fallback_reasons: list[str] = []
         self.api_error: str | None = None
+        self._retries_at_start: collections.Counter = collections.Counter()
         self._restores: list[tuple] = []
         self._handler: logging.Handler | None = None
 
@@ -77,15 +92,29 @@ class RunMonitor:
         if self._handler is not None:
             logging.getLogger(vision.__name__).removeHandler(self._handler)
             self._handler = None
+        if self._vision_level is not None:
+            logging.getLogger(vision.__name__).setLevel(self._vision_level)
+            self._vision_level = None
+
+    def transient_retries(self) -> dict:
+        made = vision._client.transient_retries - self._retries_at_start
+        return {"total": sum(made.values()), "by_type": dict(made)}
 
     def install(self) -> None:
         vision_client = vision._client
+        self._retries_at_start = collections.Counter(vision_client.transient_retries)
         embed_client = embedder._client
-        self._patch(vision_client, "generate_vision", self._guard(vision_client.generate_vision, self._count_vision))
+        self._patch(
+            vision_client, "generate_vision", self._guard(vision_client.generate_vision, self._count_vision, self.max_units)
+        )
         self._patch(embed_client, "embed_batch", self._guard(embed_client.embed_batch, self._count_embed))
         self._patch(vision, "run_ocr", self._time_ocr(vision.run_ocr))
         self._handler = _FallbackHandler(self.fallback_reasons)
-        logging.getLogger(vision.__name__).addHandler(self._handler)
+        vision_logger = logging.getLogger(vision.__name__)
+        vision_logger.addHandler(self._handler)
+        # The per-call start and finish lines are INFO; show them for the length of the run.
+        self._vision_level = vision_logger.level
+        vision_logger.setLevel(logging.INFO)
 
     def _count_vision(self, seconds: float, args: tuple, kwargs: dict) -> None:
         self.vision_calls += 1
@@ -97,13 +126,17 @@ class RunMonitor:
         self.embed_texts += len(texts)
         self.embed_seconds += seconds
 
-    def _guard(self, function, count):
+    def _guard(self, function, count, limit: int | None = None):
         def wrapper(*args, **kwargs):
+            if limit is not None and self.vision_calls >= limit:
+                raise UnitLimitReached(limit)
             started = time.perf_counter()
             try:
                 return function(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001 - recorded, then either stop the run or re-raise unchanged
                 self.api_error = f"{type(exc).__name__}: {exc}"
+                if is_transient_error(exc):
+                    self.api_error += f" (transient network error; gave up after {len(vision._client.transient_delays)} retries)"
                 if self.stop_on_error:
                     raise ApiErrorStop(self.api_error) from exc
                 raise
@@ -217,6 +250,7 @@ def main() -> int:
     parser.add_argument("--allow-truncation", action="store_true", help="keep the top pages when over the cap")
     parser.add_argument("--continue-on-api-error", action="store_true", help="let vision errors fall back to OCR")
     parser.add_argument("--summary-json", type=Path, help="write the run's numbers to this file")
+    parser.add_argument("--max-units", type=int, metavar="N", help="canary: stop cleanly after N uncached vision units")
     args = parser.parse_args()
 
     paths = sorted(p for p in args.corpus_dir.iterdir() if p.is_file())
@@ -234,7 +268,8 @@ def main() -> int:
         print_plan(selection, files, chart_dense)
         return 0
 
-    monitor = RunMonitor(stop_on_error=not args.continue_on_api_error)
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    monitor = RunMonitor(stop_on_error=not args.continue_on_api_error, max_units=args.max_units)
     monitor.install()
     before = store_report()
     started = time.perf_counter()
@@ -249,6 +284,10 @@ def main() -> int:
         print("Re-run with --allow-truncation to keep the best pages instead.", file=sys.stderr)
         code = 2
         summary["stopped"] = "vision plan over the cap"
+    except UnitLimitReached as exc:
+        print(f"Stopped cleanly after {exc.args[0]} uncached vision units (--max-units). Nothing was indexed; the "
+              "responses are in the vision cache, so a full run will not pay for them again.", file=sys.stderr)
+        summary["stopped"] = f"max-units: stopped cleanly after {exc.args[0]} uncached vision units"
     except ApiErrorStop as exc:
         print(f"STOPPED at the first API error: {exc}", file=sys.stderr)
         print("Nothing was indexed after this point. Run the script again to resume: cached vision responses and "
@@ -267,6 +306,7 @@ def main() -> int:
                 "tokens_by_stage": tracker.by_stage(),
                 "prompt_tokens": sum(e.prompt_tokens or 0 for e in entries),
                 "output_tokens": sum(e.output_tokens or 0 for e in entries),
+                "transient_retries": monitor.transient_retries(),
                 "fallback_to_ocr": len(monitor.fallback_reasons),
                 "fallback_reasons": dict(collections.Counter(monitor.fallback_reasons))},
         embedding={"api_calls": monitor.embed_calls, "texts_embedded": monitor.embed_texts,

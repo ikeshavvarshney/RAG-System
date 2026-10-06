@@ -212,7 +212,9 @@ def extract(content: bytes, filename: str, vision_units: set[int] | None = None)
         pieces.extend(
             vision.extract_pages(
                 [
-                    vision.VisionPage(image.data, page=None, location=image.location, mime_type=image.mime_type)
+                    vision.VisionPage(
+                        image.data, page=None, location=image.location, mime_type=image.mime_type, source_doc=filename
+                    )
                     for image in plan.kept
                 ],
                 skip_failures=True,
