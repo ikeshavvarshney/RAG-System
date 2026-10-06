@@ -3,7 +3,7 @@ import Link from "next/link";
 const PIPELINE = [
   {
     step: "Extract",
-    body: "PDFs, DOCX files and images are routed by their magic bytes, not their extension. Pages with a text layer are read directly. Pages that are really scans or full-page figures are rendered and sent to a vision model, which transcribes tables as markdown and describes charts by their axes and values. If that fails, OCR takes over.",
+    body: "PDFs, DOCX files and images are routed by their magic bytes, not their extension. Pages with a text layer are read directly. Pages that hold tables, charts or large figures are also rendered and sent to a vision model, which transcribes tables as markdown and describes charts by their axes and values. Scanned pages with no text layer go to OCR, which also takes over when the vision model fails.",
   },
   {
     step: "Chunk",
@@ -82,9 +82,9 @@ export default function Home() {
             back to a web search and cites the pages it used. Every answer is
             fact-checked against its sources, and the chat shows each pipeline
             stage as it runs plus the tokens and estimated cost it took.
-            Ingestion is slow by nature, since every figure and scanned page
-            costs a vision call, so expect minutes rather than seconds for a
-            large batch.
+            Ingestion is slow by nature, since every figure costs a vision call
+            and every scanned page is read by OCR, so expect minutes rather
+            than seconds for a large batch.
           </p>
         </section>
 
