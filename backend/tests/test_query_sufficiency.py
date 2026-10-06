@@ -52,6 +52,26 @@ def test_thresholds_are_inclusive_at_high_and_exclusive_at_low(fake_llm):
     assert _assess([_candidate("a", dense=0.7)]).method == "llm"
 
 
+def test_session_upload_below_the_low_threshold_still_gets_the_llm_verdict(fake_llm):
+    fake_llm.replies[STAGE] = json.dumps({"sufficient": True, "reason": "the passage lists the week 1 progress"})
+
+    result = asyncio.run(assess("what is the progress from week 1", [_candidate("a", dense=0.55)], session_scoped=True))
+
+    assert result.sufficient and result.method == "llm"
+
+
+def test_session_upload_can_still_be_judged_insufficient(fake_llm):
+    fake_llm.replies[STAGE] = json.dumps({"sufficient": False, "reason": "unrelated"})
+
+    result = asyncio.run(assess("what is asked?", [_candidate("a", dense=0.55)], session_scoped=True))
+
+    assert not result.sufficient and result.method == "llm"
+
+
+def test_default_low_threshold_leaves_a_0_80_score_to_the_llm():
+    assert type(settings).model_fields["SUFFICIENCY_LOW_THRESHOLD"].default == 0.78
+
+
 def test_no_candidates_is_insufficient_without_an_llm_call(fake_llm):
     result = _assess([])
 

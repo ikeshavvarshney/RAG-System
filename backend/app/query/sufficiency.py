@@ -89,7 +89,7 @@ async def _llm_verdict(question: str, candidates: list[Candidate]) -> tuple[bool
 
 
 async def _decide(
-    question: str, candidates: list[Candidate], scores: SufficiencyScores
+    question: str, candidates: list[Candidate], scores: SufficiencyScores, session_scoped: bool
 ) -> SufficiencyResult:
     if not candidates:
         return SufficiencyResult(False, "no candidates retrieved", "score", scores)
@@ -98,7 +98,9 @@ async def _decide(
     top = scores.top_dense
     if top is not None and top >= high:
         return SufficiencyResult(True, f"top dense similarity {top:.3f} >= {high}", "score", scores)
-    if top is not None and top < low:
+    # The low cut-off was calibrated on the corpus. A session store is a few passages the user chose to ask about,
+    # where a broad question scores low against every single passage, so there the verdict always reads them.
+    if top is not None and top < low and not session_scoped:
         return SufficiencyResult(False, f"top dense similarity {top:.3f} < {low}", "score", scores)
 
     # Without a verdict the grey zone leans insufficient: web search failing degrades to corpus-only,
@@ -114,8 +116,8 @@ async def _decide(
     return SufficiencyResult(sufficient, reason, "llm", scores)
 
 
-async def assess(question: str, candidates: list[Candidate]) -> SufficiencyResult:
-    result = await _decide(question, candidates, compute_scores(candidates))
+async def assess(question: str, candidates: list[Candidate], *, session_scoped: bool = False) -> SufficiencyResult:
+    result = await _decide(question, candidates, compute_scores(candidates), session_scoped)
     logger.info(
         "sufficiency: sufficient=%s method=%s top_dense=%s reason=%s",
         result.sufficient,
