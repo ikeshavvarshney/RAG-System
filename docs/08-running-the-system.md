@@ -225,11 +225,11 @@ The response reports per-file success and failure:
 }
 ```
 
-**Expect a full-corpus ingest to take roughly half an hour.** Measured against the 50-document corpus: 264 PDF pages, of which only 30 need vision (the two scanned CIA PDFs account for all of them), plus the 12 standalone images. That is 42 vision calls at 15 to 30 seconds each, and about 1,340 passages to embed at the 0.9 second pacing that keeps the embedding API inside its free-tier ceiling. Vision is therefore the smaller cost; most of the time is embedding.
+**Expect a full-corpus ingest to take from half an hour to an hour and a half, depending on the CPU.** The model calls are the smaller part. Across the 50-document corpus the vision plan selects about 74 units (the 12 standalone images, 8 embedded DOCX images, and some 54 PDF pages with tables or charts), each a 15 to 30 second call, and about 560 passages are embedded at the 0.9 second pacing that keeps the embedding API inside its free-tier ceiling. The variable part is OCR, which runs locally on the 30 scanned pages of the two CIA PDFs and on any page whose vision reply was unusable. At about 3 seconds per page that is negligible. On the project's slower 4-core machine it measured 2.5 to 6 minutes per page: ingesting 49 documents there took about 90 minutes, an hour of it OCR on 18 pages.
 
 A larger key pool reduces rate-limit stalls but not per-call latency, so it helps only if the run is actually being throttled.
 
-Two properties make a long run safe to interrupt. Vision responses are cached by image content, so a re-run does not pay for transcription twice. Indexing is idempotent, keyed on passage identity, and each embedding batch is written as soon as it succeeds, so re-running an interrupted ingest tops up the index rather than duplicating it.
+Three properties make a long run safe to interrupt. Vision responses and OCR results are cached by image content, so a re-run does not pay for either twice. Passage identifiers are deterministic and a re-ingested document replaces its earlier passages, so running the same files again does not duplicate them. And each embedding batch is written as soon as it succeeds.
 
 One property makes it worth batching anyway: `ingest_files` extracts every file before it indexes anything. If a 50-file request dies during extraction, nothing from that request is indexed, and the extraction work (though not the API cost) is repeated.
 
@@ -243,7 +243,7 @@ Limits enforced by the endpoint: 60 files per request, 50 MB per file, and `.pdf
 
 | Value | Cost per page | Use |
 |---|---|---|
-| `paddle` | ~3s | Default. Plain text recognition. |
+| `paddle` | ~3s on a fast CPU, minutes on a slow one | Default. Plain text recognition. |
 | `paddle-structure` | ~75s on CPU | PP-StructureV3: recovers table rows and columns as markdown. The RQ2 baseline. |
 | `tesseract` | ~1s | Skips paddle entirely. |
 
@@ -251,7 +251,7 @@ Limits enforced by the endpoint: 60 files per request, 50 MB per file, and `.pdf
 
 **Warm the structure models once, with network access, before an RQ2 run.** PP-StructureV3 uses 13 models (about 1.1 GB, in `~/.paddlex/official_models/`, never in the repository), and PaddleX creates some of them only on the first table prediction, so the first real table would otherwise try to download mid-run. `python scripts/warm_ocr_models.py` (run it with `backend/.venv`) builds the pipeline, runs one prediction on a synthetic table so those models download too, and prints each cached model's path and size. After that the baseline runs offline: set `HF_HUB_OFFLINE=1` and `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True` to stop PaddleX probing its model hosts at startup.
 
-Note that OCR runs rarely in normal operation. Vision handles figures and scanned pages, so a corpus ingested with a working vision path produces few or no `ocr` passages.
+OCR runs on scanned PDF pages, which go to it directly, and on pages where the vision reply was unusable. On a slow CPU a page can take several minutes, so budget for it: the corpus's two scanned PDFs hold 30 pages. Results are cached in `backend/data/cache/ocr/`, so a run that is stopped and started again resumes from the pages already recognised.
 
 ---
 
@@ -284,6 +284,6 @@ Leave the caches in place unless you are deliberately re-testing extraction: del
 
 **Every figure comes back as `ocr` and none as `vision`.** The vision calls are failing. Check `GEMINI_API_KEYS` is set and that the log does not show repeated rate limits; the fallback is deliberate and silent by design, so the log is the only place it shows.
 
-**Ingestion appears to hang.** It is most likely working. A scanned page or a figure takes 15 to 30 seconds, and the request returns only when the whole batch is finished. The backend log reports progress per stage.
+**Ingestion appears to hang.** It is most likely working. A figure sent to vision takes 15 to 30 seconds and a page sent to OCR can take minutes on a slow CPU, the request returns only when the whole batch is finished, and nothing is logged per page. Finished OCR pages appear one by one as files in `backend/data/cache/ocr/`, which is the easiest way to see progress. Splitting the corpus into smaller batches, and ingesting the scanned PDFs on their own, keeps each run short.
 
 **`paddlex` reports a `DependencyError` for PP-StructureV3.** The `[ocr]` extra is not installed: `pip install -e ".[ocr]"` from `backend/`.

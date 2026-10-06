@@ -36,7 +36,7 @@ A record of the significant technical decisions taken during design, with the re
 
 `extraction_method` records whether a passage was produced by vision extraction, OCR, or direct text extraction. RQ2 compares the first two, and this field is what makes the comparison possible. It must be recorded accurately from the first ingestion run, including on fallback paths. A passage produced by OCR fallback but labelled as vision-extracted would silently corrupt the headline result of the study.
 
-`corpus_scope` separates the persistent corpus from ad-hoc session uploads within a single store, supporting scoped retrieval without maintaining parallel infrastructure.
+`corpus_scope` separates the persistent corpus from ad-hoc session uploads. Each session is held in its own Chroma directory with its own keyword index, so a session is discarded by removing a directory and cannot contaminate the corpus the ablations are measured against.
 
 **D-11. Citations modelled as a discriminated union.** Corpus-sourced citations carry document and page; web-sourced citations carry a URL and title.
 
@@ -62,13 +62,25 @@ A record of the significant technical decisions taken during design, with the re
 
 ## 7.4 Ingestion Behaviour
 
-**D-17. Scanned PDFs are detected and processed by OCR immediately.** Pages whose extracted character count falls below a threshold are rasterised and passed to OCR, decided per page rather than per document.
+**D-17. Scanned PDFs are detected and processed by OCR immediately.** A page with fewer than 50 extractable characters and a raster image covering at least half of it is rasterised and passed straight to OCR, decided per page rather than per document. Such a page is never sent to the vision model and never counts against the vision budget.
 
 *Reasoning:* documents mixing digital and scanned pages are common, and a per-document decision handles them incorrectly in both directions.
 
-**D-18. DOCX ingestion extracts both body text and embedded images.** Embedded images are processed by OCR.
+**D-18. DOCX ingestion extracts both body text and embedded images.** The body becomes sectioned text with tables as markdown. Embedded images above a minimum size go through the same path as standalone images: the vision model first, OCR on failure.
 
 *Reasoning:* a substantial amount of tabular content in DOCX files appears as pasted images rather than as native tables. Note also that table-cell text is not present in the document's paragraph collection and must be walked separately, or it is silently lost.
+
+**D-47. Vision pages are chosen for the whole batch before any model call.** Every PDF page, embedded DOCX image, and standalone image is scored locally. The best candidates are kept within `MAX_VISION_PAGES` (80), at most 6 per document. The corpus ingestion script treats a plan over the cap as an error; the upload endpoint truncates and reports what it dropped.
+
+*Reasoning:* the earlier design sent scanned pages to vision and discovered the budget halfway through a run, with the overflow falling to OCR. Planning first makes the spend known before it is incurred, spends it on pages with tables and charts rather than on plain transcription, and keeps one long report from consuming the budget of forty-nine others. A page that is not selected loses nothing it had: its text layer is still indexed.
+
+**D-48. Passage identifiers are deterministic, and re-ingesting a document replaces it.** An identifier is a hash of the passage's scope, document, extraction method, chunk type, page, location, position, and text. Before a re-ingested document is indexed, its previous passages are deleted.
+
+*Reasoning:* random identifiers made every re-ingestion add a second copy of each passage, which inflates retrieval results and distorts the ablations. Deterministic identifiers make an unchanged passage a no-op, and the delete-first step removes passages that an edited file no longer produces.
+
+**D-49. OCR results are cached by image and OCR settings.** The key covers the pixels, the configured engine, the language, the confidence floor, and the text-line orientation setting. A result is stored only when the configured engine produced it.
+
+*Reasoning:* OCR measured minutes per page on CPU, and a run that was stopped lost all of it. Excluding fallback results matters for RQ2: text from Tesseract, cached while PaddleOCR was unavailable, would otherwise be served later as PaddleOCR output and silently corrupt the OCR baseline.
 
 **D-19. Per-file error isolation.** An unsupported, corrupt, or unreadable file is skipped with a recorded error; the remainder of the batch proceeds.
 
@@ -82,9 +94,9 @@ A record of the significant technical decisions taken during design, with the re
 
 *Reasoning:* driven by RQ2 more than by general accuracy. PP-Structure performs table structure recognition, recovering rows and columns rather than emitting words in reading order. With a structure-blind baseline, much of what RQ2 would measure is simply structured versus unstructured output, an unsurprising result for vision extraction that says little about the question of interest. A structure-aware baseline makes the comparison a genuine test of whether vision-language understanding adds value beyond accurate transcription. Tesseract is retained so that an unavailable primary engine does not block ingestion.
 
-*Amended after measurement.* PP-Structure costs roughly 75 seconds per page on this project's CPU-only hardware, against roughly 3 seconds for plain PaddleOCR recognition. The cost proved to be model-bound rather than resolution-bound: rendering pages at 100, 150, and 200 DPI produced 96, 75, and 81 seconds respectively, so it cannot be tuned away by sending smaller images. Disabling the seal, formula, and chart subpipelines and substituting the mobile detection and recognition models brought an initial 427 seconds per page down to that 75, which is as far as it goes without a GPU.
+*Amended after measurement.* PP-Structure costs roughly 75 seconds per page on this project's CPU-only hardware, against roughly 3 seconds for plain PaddleOCR recognition. These figures are from the machine the measurement was made on; on the project's second, slower machine plain PaddleOCR measured 2.5 to 6 minutes per page, which is what led to caching OCR results (D-49). The cost proved to be model-bound rather than resolution-bound: rendering pages at 100, 150, and 200 DPI produced 96, 75, and 81 seconds respectively, so it cannot be tuned away by sending smaller images. Disabling the seal, formula, and chart subpipelines and substituting the mobile detection and recognition models brought an initial 427 seconds per page down to that 75, which is as far as it goes without a GPU.
 
-Three engines are therefore wired as a cascade (PP-Structure, then PaddleOCR, then Tesseract) selected by `OCR_ENGINE`, and the *default* is plain PaddleOCR. PP-Structure remains the RQ2 baseline and is enabled for the runs that produce it, where hours of processing for one comparison is an acceptable cost paid once. It is not the default for ordinary ingestion, where the same cost buys nothing: vision handles figures and scanned pages, so OCR runs only on fallback, and a corpus ingested with a healthy vision path produces few or no OCR passages for structure recognition to improve. The decision's substance is unchanged, since RQ2's baseline is still structure-aware; what changed is that being structure-aware is a mode rather than the default.
+Three engines are therefore wired as a cascade (PP-Structure, then PaddleOCR, then Tesseract) selected by `OCR_ENGINE`, and the *default* is plain PaddleOCR. PP-Structure remains the RQ2 baseline and is enabled for the runs that produce it, where hours of processing for one comparison is an acceptable cost paid once. It is not the default for ordinary ingestion, where the same cost buys nothing: vision handles figures, so OCR runs only on scanned pages (D-17) and on vision failures, and a corpus ingested with a healthy vision path produces few OCR passages for structure recognition to improve. The decision's substance is unchanged, since RQ2's baseline is still structure-aware; what changed is that being structure-aware is a mode rather than the default.
 
 **D-28. Fast model for vision extraction, subject to empirical verification.** Both available models are compared against a sample of real corpus tables before the full corpus is processed; the selection is then held fixed.
 
@@ -98,7 +110,7 @@ Three engines are therefore wired as a cascade (PP-Structure, then PaddleOCR, th
 
 *Reasoning:* three consequences follow, each addressing a distinct correctness failure. Session isolation prevents an answer derived from one user's uploads being served to another. Recording cited documents allows cache invalidation when a document is deleted, without which the system would continue serving an answer citing a document that no longer exists. Keying on the resolved rather than the literal question prevents a follow-up such as "what about 2024?" from colliding across unrelated conversations.
 
-Because a cache hit bypasses the entire pipeline, no downstream stage can catch an incorrect hit. The similarity threshold is therefore set conservatively.
+Because a cache hit bypasses the entire pipeline, no downstream stage can catch an incorrect hit. The similarity threshold is therefore set conservatively. Only verified, cited answers drawn from the corpus alone are written: an answer citing web sources would go stale with nothing to invalidate it, and an answer from a session's own uploads is not cached at all.
 
 **D-22. The keyword index is rebuilt after any corpus change.**
 
@@ -106,7 +118,7 @@ Because a cache hit bypasses the entire pipeline, no downstream stage can catch 
 
 **D-23. Document deletion reaches three locations.** Vector store, keyword index, and answer cache.
 
-*Reasoning:* omitting any one leaves deleted content reachable by some path. The extraction and embedding caches are keyed by content hash, not by document, and are not a retrieval path, so they are deliberately excluded. Deletion is scoped, so that a session may delete only its own uploads, and operates on documents rather than passages, matching the user's mental model.
+*Reasoning:* omitting any one leaves deleted content reachable by some path. The extraction, OCR, and embedding caches are keyed by content hash, not by document, and are not a retrieval path, so they are deliberately excluded. Deletion is scoped, so that a session may delete only its own uploads, and operates on documents rather than passages, matching the user's mental model.
 
 **D-24. Conversational context is bounded to the last 2-3 turns, and follow-up questions are resolved into self-contained form before any downstream stage.**
 
@@ -115,6 +127,14 @@ Because a cache hit bypasses the entire pipeline, no downstream stage can catch 
 **D-25. Reranking uses a local cross-encoder rather than a hosted reranking API.**
 
 *Reasoning:* a 22-million-parameter cross-encoder executes in tens of milliseconds on CPU. A hosted alternative would add a network round trip to every query, a third credential pool, and a third rate limit, in exchange for quality the local model broadly matches at this corpus size. A larger cross-encoder remains available as a drop-in replacement should reranking prove to be the accuracy bottleneck during evaluation.
+
+**D-50. Sufficiency is gated on dense similarity, with a model verdict in the uncertain band.** At a best cosine similarity of 0.90 or above the passages pass, below 0.78 they fail, and in between a model reads the top five passages in full and decides. Session uploads are never failed on the score alone.
+
+*Reasoning:* fused scores carry no absolute relevance and BM25 scores are unbounded, so cosine similarity is the only usable cheap signal. The thresholds were calibrated on 24 corpus questions. The lower one was first 0.82 and was moved to 0.78 in Week 6 after answerable questions scored 0.819 (a DOCX table) and 0.801 (a broad question about one uploaded document) and were sent to web search without the passages being read; questions the corpus clearly cannot answer score 0.75 to 0.76. The verdict originally saw only the first 700 characters of each passage and missed answers that sat past that point, so it now reads up to 4000. A false "insufficient" is not harmless: the web results it brings in can be about unrelated meanings of the question, which is why generation is also told not to add them when the documents already answer (QUERY-09).
+
+**D-51. Cost estimates count everything that is billed.** Output tokens include the model's thinking tokens, and each web search is reported with its search depth.
+
+*Reasoning:* Gemini bills thinking tokens at the output rate but reports them apart from the answer tokens, so counting only the latter understated the most expensive stage. Tavily bills per request by depth (one credit for basic, two for advanced), not by tokens, so a search is priced from its depth label rather than from a token count. The prices themselves live in the frontend, taken from the providers' published pricing pages.
 
 **D-29. Embeddings are cached by content hash.**
 
@@ -126,7 +146,7 @@ A related constraint: query and passage vectors must originate from the same mod
 
 *Reasoning:* implemented naively the query pipeline is eight sequential model calls, which at typical latencies leaves the user waiting an unacceptable period before any output. These four measures reduce the common path substantially while preserving every requirement's independent verifiability.
 
-Vision extraction is an ingestion-time cost and does not affect query latency, with one exception. Session uploads perform ingestion synchronously in response to a user action, so they default to text and OCR extraction only, with vision extraction available as an explicit opt-in.
+Vision extraction is an ingestion-time cost and does not affect query latency, with one exception. Session uploads perform ingestion synchronously in response to a user action. They go through the same vision selection as the corpus (D-47), with one difference: an upload whose plan exceeds the vision cap keeps its best pages and reports the rest as dropped instead of failing.
 
 ---
 
@@ -150,6 +170,10 @@ Token counts are the reported measure and monetary cost is derived from rates he
 
 This infrastructure is required independently of the interface feature it supports: the evaluation reports per-stage cost as part of its efficiency analysis, and free-tier management depends on it operationally.
 
+**D-52. Every HTTP request and every answered query is logged with a shared request identifier.** The backend logs method, path, status, and duration once the response body has been sent, plus one summary line per answered query. The identifier is returned in the `X-Request-ID` header, and the frontend prints the same identifier in its own request log.
+
+*Reasoning:* the application's informational logs were previously invisible under the server's default configuration, which made a failed query hard to trace. Timing a request to the end of its body, rather than to its headers, is what makes the duration of a streamed query meaningful. A shared identifier lets a line in the browser console be matched to its line in the server log.
+
 ---
 
 ## 7.7 Decisions Revised During Design
@@ -163,4 +187,6 @@ Recorded for completeness, as each represents a design position that was reconsi
 | Deployment as a mandatory requirement | Future scope (DEPLOY-01, DEPLOY-02) | Scope growth elsewhere made an eight-week deployment commitment unrealistic; the core deliverable runs locally |
 | Hosted reranking API | Local cross-encoder (D-25) | Better latency, no rate limit, comparable quality at this scale |
 | Tesseract as primary OCR | PaddleOCR, with PP-Structure as the opt-in RQ2 baseline (D-27) | A structure-aware baseline makes RQ2's comparison methodologically sound; measured cost keeps it out of the default path |
+| Scanned pages sent to vision, overflow past the page budget sent to OCR | Scanned pages straight to OCR (D-17); vision pages planned per batch (D-47) | Spends the vision budget on tables and charts, and makes the spend known before the run |
+| Sufficiency failed on score alone below 0.82 | Model verdict from 0.78, and always for session uploads (D-50) | Answerable questions were being sent to web search unread |
 | Fixed-size chunking | Structure-aware chunking (D-12) | Fixed offsets divide sentences and tables, degrading retrieval and quoted context |

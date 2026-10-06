@@ -34,7 +34,7 @@ Each requirement carries a stable identifier used throughout the project documen
 | **QUERY-08** | The system reranks fused context using a cross-encoder and consolidates it before generation. |
 | **QUERY-09** | The system generates an answer from the reranked context with mandatory inline citations. |
 | **QUERY-10** | The system filters claims not supported by the cited context before returning the answer. |
-| **QUERY-11** | The system writes the generated answer to the semantic cache for subsequent retrieval. |
+| **QUERY-11** | The system writes the generated answer to the semantic cache for subsequent retrieval, when it is a verified answer drawn from the corpus alone. |
 | **QUERY-12** | The system decomposes complex multi-part questions into sub-questions, retrieves for each independently, and synthesises a combined answer. |
 | **QUERY-13** | The system validates and sanitises incoming queries before processing them. |
 | **QUERY-14** | The system checks generated answers against safety and quality criteria before returning them. This is a distinct check from the groundedness filtering in QUERY-10. |

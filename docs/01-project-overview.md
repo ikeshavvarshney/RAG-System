@@ -45,7 +45,7 @@ Both questions are evaluated using the RAGAS metric suite against a hand-constru
 
 | Area | Included |
 |---|---|
-| **Document ingestion** | Type-based routing for PDF/DOCX/image; text-layer extraction; vision-model extraction of tables and charts; OCR for scanned documents, embedded images, and vision fallback; structure-aware chunking; dual indexing |
+| **Document ingestion** | Type-based routing for PDF/DOCX/image; text-layer extraction; vision-model extraction of tables, charts, and embedded images; OCR for scanned documents and vision fallback; structure-aware chunking; dual indexing |
 | **Retrieval** | Multi-query expansion; parallel dense and sparse search; Reciprocal Rank Fusion; sufficiency assessment; web-search fallback; cross-encoder reranking |
 | **Generation** | Cited answer generation; groundedness filtering; output safety checks; semantic answer caching |
 | **Conversation** | Greeting short-circuit; follow-up question resolution against recent turns |
