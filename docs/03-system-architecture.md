@@ -108,9 +108,11 @@ flowchart TD
     VS --> RF["Reciprocal Rank Fusion"]
     KS --> RF
 
-    RF --> SUFF{"Sufficient?<br/>dense score, then<br/>model verdict"}
-    SUFF -->|Yes| RR["Cross-encoder reranking<br/>+ consolidation"]
-    SUFF -->|No| WS["Web search"] --> WR["Web results with source URLs<br/>added to the corpus candidates"] --> RR
+    RF --> SUFF{"Sufficient?<br/>dense score, then model verdict:<br/>sufficient / partial / insufficient"}
+    SUFF -->|sufficient| RR["Cross-encoder reranking<br/>+ consolidation"]
+    SUFF -->|"partial or<br/>insufficient"| WQ["Rewrite the web query<br/>from the question and the<br/>closest passages"]
+    WQ --> WS["Web search"] --> WF["Relevance filter<br/>local embeddings,<br/>off-topic results dropped"]
+    WF --> WR["Web results with source URLs<br/>added to the corpus candidates"] --> RR
 
     RR --> GM["Answer generation<br/>with inline citations<br/>one answer across all sub-questions"]
     GM --> CIT["Structural citation filter"]
@@ -138,17 +140,17 @@ flowchart TD
 
 **Reciprocal Rank Fusion (QUERY-05).** The two ranked lists are merged by rank position rather than by score, since cosine similarity and BM25 scores are not on comparable scales. The relative weight of the dense and sparse contributions is a configuration parameter, and is the variable manipulated in RQ1.
 
-**Sufficiency assessment (QUERY-06).** Fused results are assessed for whether they can actually answer the question, combining a cheap signal with a model judgment over the candidate passages. The signal is the best dense cosine similarity: at 0.90 or above the passages pass without a model call, below 0.78 they fail without one, and in between the model reads the top five passages in full and decides. Session uploads are never failed on the score alone, because the thresholds were calibrated on the corpus and a broad question about one uploaded document scores low against every single passage; there the model verdict always decides. When no verdict can be obtained the result leans insufficient.
+**Sufficiency assessment (QUERY-06).** Fused results are assessed for whether they can actually answer the question, combining a cheap signal with a model judgment over the candidate passages. The signal is the best dense cosine similarity: at 0.90 or above the passages pass without a model call, below 0.78 they fail without one, and in between the model reads the top five passages in full and decides. Its verdict has three values: sufficient, partial, or insufficient. A partial verdict means the passages answer part of the question, and it names the part they leave uncovered. The model is told to resolve relative references such as "next week" or "the previous quarter" against the period the document itself covers, and to count plans and schedules as valid answers about later periods. Session uploads are never failed on the score alone, because the thresholds were calibrated on the corpus and a broad question about one uploaded document scores low against every single passage; there the model verdict always decides. When no verdict can be obtained the result leans insufficient.
 
-**Web fallback (QUERY-07).** When retrieval is assessed as insufficient, a web search supplies supplementary context. Web results join the retrieved candidates rather than replacing them: they take reserved slots in the reranking pool, so a full shortlist of corpus passages cannot crowd them out, and the cross-encoder then ranks both kinds together. Web results carry a source URL rather than a document and page, and this distinction propagates through to the citations presented to the user. A failed search degrades to the corpus passages alone.
+**Web fallback (QUERY-07).** When retrieval is assessed as partial or insufficient, a web search supplies supplementary context. The search query is not the raw question: a model call rewrites it from the question plus short excerpts of the three closest document passages, so the search keeps the document's subject and domain, and on a partial verdict it searches only for the uncovered part. If the rewrite fails or there are no passages, the plain question is searched. Results from a rewritten query then pass a relevance filter: each is embedded with a small local sentence-embedding model and dropped when its cosine similarity to the query is below 0.30, which removes pages that only share words with the question. Web results join the retrieved candidates rather than replacing them: they take reserved slots in the reranking pool, so a full shortlist of corpus passages cannot crowd them out, and the cross-encoder then ranks both kinds together. Web results carry a source URL rather than a document and page, and this distinction propagates through to the citations presented to the user. A failed search degrades to the corpus passages alone. When a search succeeds but every result is dropped as off-topic, the answer says so in a closing note and is not written to the cache.
 
 **Reranking (QUERY-08).** A cross-encoder scores each candidate against the original question directly. This is more accurate but more expensive than the bi-encoder similarity used at retrieval time, which is why it is applied to a shortlist rather than the full corpus. The top candidates are consolidated into a context set within a fixed token budget.
 
-**Generation (QUERY-09).** The generation model receives numbered context passages, each labelled with its source identity, and is instructed to answer only from that context, to state plainly when the context is insufficient, and to cite inline. For a decomposed question there is no separate synthesis step: one generation call receives every sub-question with its own passages and writes a single coherent answer. When document passages answer the question, the model is told not to add unrelated meanings of the question taken from web pages.
+**Generation (QUERY-09).** The generation model receives numbered context passages, each labelled with its source identity, and is instructed to answer only from that context, to state plainly when the context is insufficient, and to cite inline. For a decomposed question there is no separate synthesis step: one generation call receives every sub-question with its own passages and writes a single coherent answer. Web passages are treated as supplementary: the model uses one only when it is about the same subject as the document passages, and when the documents answer part of the question it uses web passages only for the part they leave uncovered.
 
 **Groundedness filtering and output guardrails (QUERY-10, QUERY-14).** Three steps after generation. A structural filter, with no model call, removes claims that carry no citation marker or a marker that resolves to no passage. One model call then judges both whether each cited passage genuinely supports the claim attached to it and whether the answer is safe and usable; the two verdicts share the call but are reported separately. Finally a deterministic output guardrail applies the safety verdict and its own checks. Unsupported claims are removed; if nothing survives, the system reports honestly that the retrieved context does not answer the question.
 
-**Write-back (QUERY-11).** Every answered turn is appended to conversation history. The semantic cache is written only for a verified, safe, cited answer drawn from the corpus alone. Rejected answers and non-answers are never cached, because a cached failure would be served instantly and confidently on every subsequent match. Answers citing web sources are not cached, since they go stale and nothing would ever invalidate them, and neither are answers from a session's own uploads.
+**Write-back (QUERY-11).** Every answered turn is appended to conversation history. The semantic cache is written only for a verified, safe, cited answer drawn from the corpus alone. Rejected answers and non-answers are never cached, because a cached failure would be served instantly and confidently on every subsequent match. Answers citing web sources are not cached, since they go stale and nothing would ever invalidate them, and neither are answers from a session's own uploads or answers whose web search returned only off-topic results.
 
 ---
 
@@ -224,12 +226,13 @@ backend/
     query/               Guardrails, history, cache, decomposition, expansion, retrieval, fusion,
                          sufficiency, web search, reranking, generation, citations, verification
     shared/              Passage and citation schemas, vector store, keyword index, session stores
-  scripts/               Corpus ingestion script
+  scripts/               Corpus ingestion script, naive-baseline index build
   tests/
 frontend/                Next.js application
 scripts/                 End-to-end run, corpus validation, model comparison scripts
 data/corpus/             Document corpus and manifest
 data/eval/               Reference question set
+eval/                    RAGAS evaluation harness and run comparison
 ```
 
 The `shared/` package holds everything both pipelines depend on. The division between `ingestion/` and `query/` mirrors the division of work between team members, allowing the two halves to be developed and tested independently against the passage schema.

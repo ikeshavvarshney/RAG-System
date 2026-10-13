@@ -68,7 +68,7 @@ The following are deliberately deferred beyond the eight-week delivery. Each is 
 
 ## 1.4 Constraints
 
-**Hardware.** No dedicated GPU is available. All large-model inference, covering generation, vision extraction, and embeddings, is performed through hosted APIs. Two small models (a cross-encoder reranker and an OCR engine) run locally on CPU, where doing so is faster and cheaper than an equivalent API call.
+**Hardware.** No dedicated GPU is available. All large-model inference, covering generation, vision extraction, and embeddings, is performed through hosted APIs. A few small components (a cross-encoder reranker, a sentence-embedding model that filters web results, and the Tesseract OCR engine) run locally on CPU, where doing so is faster and cheaper than an equivalent API call.
 
 **Cost.** The project operates entirely within free service tiers. This constrains request volume and shapes several design decisions, most visibly the multi-key rotation utility and the caching layers described in [04. Technology Stack](04-technology-stack.md).
 

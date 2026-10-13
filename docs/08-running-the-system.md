@@ -271,3 +271,46 @@ Leave the caches in place unless you are deliberately re-testing extraction: del
 **Every figure comes back as `ocr` and none as `vision`.** The vision calls are failing. Check `GEMINI_API_KEYS` is set and that the log does not show repeated rate limits; the fallback is deliberate and silent by design, so the log is the only place it shows.
 
 **Ingestion appears to hang.** It is most likely working. A figure sent to vision takes 15 to 30 seconds, the request returns only when the whole batch is finished, and nothing is logged per page. Splitting the corpus into smaller batches keeps each run short.
+
+---
+
+## 8.10 Running the Evaluation
+
+The RAGAS harness lives in `eval/` and needs its own extra, installed from `backend/`:
+
+```bash
+pip install -e ".[eval]"
+```
+
+The judge is a Groq-hosted model rather than Gemini, so that answers are not scored by the model family that wrote them. Set `GROQ_EVAL_API_KEYS` (comma-separated) and `GROQ_EVAL_MODEL` in `backend/.env`.
+
+Run from the repository root. The harness sends each question in `data/eval/reference_set.json` through the live pipeline with the answer cache bypassed, saves the raw results, then scores one question at a time:
+
+```bash
+python eval/run_eval.py --audit                        # report on the reference set and exit
+python eval/run_eval.py --run-name baseline --limit 5  # first 5 questions
+python eval/run_eval.py --run-name baseline --resume   # continue a run that stopped partway
+python eval/run_eval.py --from-raw baseline            # score saved raw results without re-running the pipeline
+```
+
+Results are written to `eval/results/` (git-ignored) as `<run-name>.raw.json` and `<run-name>.scored.json`. Each question is labelled by where its answer came from (corpus, web, mixed, or none).
+
+A run can change pipeline settings without touching `backend/.env`:
+
+```bash
+python eval/run_eval.py --run-name dense-only --set FUSION_DENSE_WEIGHT=1.0   # one override, repeatable
+python eval/run_eval.py --run-name naive --preset naive                       # the naive baseline
+```
+
+The `naive` preset is dense-only retrieval with no expansion, reranking, or decomposition, read from a separate fixed-size-chunk index. Build that index once, from `backend/`:
+
+```bash
+python scripts/ingest_naive.py --dry-run     # count chunks, embed nothing
+python scripts/ingest_naive.py               # build data/chroma_naive
+```
+
+Compare two scored runs, using only the questions both answered from the corpus:
+
+```bash
+python eval/compare_runs.py baseline naive
+```
