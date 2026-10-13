@@ -91,7 +91,7 @@ def test_overloaded_model_is_retryable_but_not_a_rate_limit():
 
 def test_generate_retries_after_a_503(monkeypatch):
     monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
-    client = GeminiClient(backoff_base=0)
+    client = GeminiClient(backoff_base=0, overload_delays=(0.0,))
 
     ok = MagicMock()
     ok.text = "recovered"
@@ -468,3 +468,107 @@ def test_reranker_load_time_includes_the_import(monkeypatch, caplog):
 
     monkeypatch.undo()
     assert any("loaded in" in r.message and float(r.message.split("loaded in ")[1].rstrip("s")) >= 0.3 for r in caplog.records)
+
+
+def test_generate_rotates_key_and_retries_after_a_request_timeout(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a,key-b"))
+    client = GeminiClient(backoff_base=0)
+
+    ok = MagicMock()
+    ok.text = "recovered"
+    ok.usage_metadata.prompt_token_count = 1
+    ok.usage_metadata.candidates_token_count = 1
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = [
+            httpx.ReadTimeout("The read operation timed out"),
+            ok,
+        ]
+        assert client.generate(stage="s", model="m", prompt="p") == "recovered"
+
+    assert [call.kwargs["api_key"] for call in mock_client_cls.call_args_list] == ["key-a", "key-b"]
+
+
+def test_generate_reraises_a_timeout_after_exhausting_retries(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a,key-b"))
+    client = GeminiClient(max_retries=1, backoff_base=0)
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = httpx.ReadTimeout("timed out")
+        with pytest.raises(httpx.ReadTimeout):
+            client.generate(stage="s", model="m", prompt="p")
+
+    assert mock_client_cls.return_value.models.generate_content.call_count == 2
+
+
+def test_a_timeout_is_not_retried_outside_text_generation(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a,key-b"))
+    client = GeminiClient(backoff_base=0)
+    calls = []
+
+    def operation(api_key):
+        calls.append(api_key)
+        raise httpx.ReadTimeout("timed out")
+
+    with pytest.raises(httpx.ReadTimeout):
+        client._call_with_key_rotation(operation, scope="m")
+
+    assert len(calls) == 1
+
+
+def _overloaded():
+    return RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+
+
+def test_a_503_is_retried_after_10_30_60_and_120_seconds_then_given_up(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a,key-b"))
+    sleeps = []
+    monkeypatch.setattr(gc.time, "sleep", sleeps.append)
+    client = GeminiClient(backoff_base=0)
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = _overloaded()
+        with pytest.raises(RuntimeError, match="503"):
+            client.generate(stage="s", model="m", prompt="p")
+
+    assert sleeps == [10.0, 30.0, 60.0, 120.0]
+    assert mock_client_cls.return_value.models.generate_content.call_count == 5
+
+
+def test_a_503_that_clears_stops_the_waiting(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    sleeps = []
+    monkeypatch.setattr(gc.time, "sleep", sleeps.append)
+    client = GeminiClient(backoff_base=0)
+
+    ok = MagicMock()
+    ok.text = "recovered"
+    ok.usage_metadata.prompt_token_count = 1
+    ok.usage_metadata.candidates_token_count = 1
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = [_overloaded(), _overloaded(), ok]
+        assert client.generate(stage="s", model="m", prompt="p") == "recovered"
+
+    assert sleeps == [10.0, 30.0]
+
+
+def test_a_rate_limit_does_not_use_the_overload_schedule(monkeypatch):
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a,key-b"))
+    sleeps = []
+    monkeypatch.setattr(gc.time, "sleep", sleeps.append)
+    client = GeminiClient(max_retries=1, backoff_base=0)
+
+    with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+        mock_client_cls.return_value.models.generate_content.side_effect = RuntimeError("429 RESOURCE_EXHAUSTED")
+        with pytest.raises(RuntimeError, match="429"):
+            client.generate(stage="s", model="m", prompt="p")
+
+    assert sleeps == []
+    assert mock_client_cls.return_value.models.generate_content.call_count == 2

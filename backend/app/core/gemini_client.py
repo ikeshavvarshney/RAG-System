@@ -41,6 +41,15 @@ def _is_retryable_error(exc: BaseException) -> bool:
     return _is_rate_limit_error(exc) or any(marker in blob for marker in _TRANSIENT_MARKERS)
 
 
+# Waits before each retry of a 503 "overloaded" reply on text generation. The overload is model-wide, so rotating to
+# another key does not help; waiting does.
+OVERLOAD_RETRY_DELAYS_SEC = (10.0, 30.0, 60.0, 120.0)
+
+
+def _is_overload_error(exc: BaseException) -> bool:
+    return _is_retryable_error(exc) and not _is_rate_limit_error(exc)
+
+
 def _is_daily_quota_error(exc: BaseException) -> bool:
     return "perday" in str(exc).lower()
 
@@ -177,11 +186,13 @@ class GeminiClient:
         max_retries: int = 3,
         backoff_base: float = 1.0,
         transient_delays: tuple[float, ...] = TRANSIENT_RETRY_DELAYS_SEC,
+        overload_delays: tuple[float, ...] = OVERLOAD_RETRY_DELAYS_SEC,
     ):
         self.tracker = tracker if tracker is not None else UsageTracker()
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.transient_delays = transient_delays
+        self.overload_delays = overload_delays
         # Overrides the API host for vision calls (a proxy, or a test pointing at a blackhole address).
         self.vision_base_url: str | None = None
         # One SDK client, with its own connection pool, per API key, reused by every vision call with that key.
@@ -256,16 +267,52 @@ class GeminiClient:
         for api_key in gemini_keys.keys:
             self._embedder_for(api_key, model_id)
 
+    def _retry_overloaded(self, operation, delays: tuple[float, ...]):
+        """Retry ``operation`` on a 503 after each of ``delays``; the error that ends the last attempt is marked so the
+        key rotation does not retry it again."""
+
+        def wrapped(api_key: str):
+            for attempt in range(len(delays) + 1):
+                try:
+                    return operation(api_key)
+                except Exception as exc:
+                    if not _is_overload_error(exc):
+                        raise
+                    if attempt == len(delays):
+                        exc._overload_exhausted = True
+                        raise
+                    logger.warning(
+                        "Gemini model overloaded (%s); retry %d/%d in %.0fs",
+                        str(exc)[:80], attempt + 1, len(delays), delays[attempt],
+                    )
+                    time.sleep(delays[attempt])
+
+        return wrapped
+
     def _call_with_key_rotation(
-        self, operation, *, scope: str = "", max_retries: int | None = None
+        self,
+        operation,
+        *,
+        scope: str = "",
+        max_retries: int | None = None,
+        retry_timeouts: bool = False,
+        overload_delays: tuple[float, ...] | None = None,
     ):
+        if overload_delays is not None:
+            operation = self._retry_overloaded(operation, overload_delays)
+
+        def retryable(exc: BaseException) -> bool:
+            if getattr(exc, "_overload_exhausted", False):
+                return False
+            return _is_retryable_error(exc) or (retry_timeouts and isinstance(exc, httpx.TimeoutException))
+
         return call_with_key_rotation(
             operation,
             gemini_keys,
             scope=scope,
             retries=self.max_retries if max_retries is None else max_retries,
             backoff_base=self.backoff_base,
-            is_rate_limited=_is_retryable_error,
+            is_rate_limited=retryable,
             is_quota_exhausted=_is_daily_quota_error,
             exhausted_block_seconds=_DAILY_QUOTA_BLOCK_SEC,
             label="Gemini",
@@ -309,7 +356,9 @@ class GeminiClient:
             )
             return response.text
 
-        return self._call_with_key_rotation(_operation, scope=model)
+        return self._call_with_key_rotation(
+            _operation, scope=model, retry_timeouts=True, overload_delays=self.overload_delays
+        )
 
     def generate_vision(
         self,
