@@ -44,3 +44,7 @@ backend/data/
 
 # Server log written by scripts/e2e_week6.py
 backend/e2e_server.log
+
+# Eval harness raw/scored runs and logs
+eval/results/
+*.log

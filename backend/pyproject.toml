@@ -36,6 +36,13 @@ ocr = [
     "paddlex[ocr]>=3.7,<3.8",
 ]
 
+# RAGAS harness (eval/run_eval.py). Judge is Groq/Llama, never Gemini (D-39).
+eval = [
+    "ragas==0.4.3",
+    "langchain-groq==1.1.3",
+    "huggingface-hub>=1.31.0,<2.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
