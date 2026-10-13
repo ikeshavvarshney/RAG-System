@@ -15,7 +15,7 @@ const PIPELINE = [
   },
   {
     step: "Answer",
-    body: "A question is answered from retrieved passages with inline citations, each traceable to a document and a page.",
+    body: "A question is checked, rewritten against the conversation, and searched through both indexes. If the passages found cannot answer it, a web search fills the gap. The answer cites each claim to a document page or web page, and a fact check drops any claim its source does not support.",
   },
 ];
 
@@ -75,12 +75,16 @@ export default function Home() {
             What works today
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-neutral-600">
-            Ingestion runs end to end: upload documents on the chat page and
-            they are extracted, chunked and indexed. Retrieval and answer
-            generation are not connected yet, so the chat will not answer
-            questions from your corpus so far. Ingestion is slow by nature,
-            since every figure and scanned page costs a vision call, so expect
-            minutes rather than seconds for a large batch.
+            The full pipeline runs end to end. Upload documents on the chat
+            page and they are extracted, chunked and indexed; ask a question
+            and it is answered from the corpus, with inline citations to the
+            document and page. When the corpus cannot answer, the system falls
+            back to a web search and cites the pages it used. Every answer is
+            fact-checked against its sources, and the chat shows each pipeline
+            stage as it runs plus the tokens and estimated cost it took.
+            Ingestion is slow by nature, since every figure and scanned page
+            costs a vision call, so expect minutes rather than seconds for a
+            large batch.
           </p>
         </section>
 

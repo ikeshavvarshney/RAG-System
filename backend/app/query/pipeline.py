@@ -174,7 +174,7 @@ async def retrieve_and_rank(
         fused = fuse(retrieval, dense_weight=settings.FUSION_DENSE_WEIGHT, k=settings.RRF_K)
 
     with stage("sufficiency"):
-        sufficiency = await assess(question, fused)
+        sufficiency = await assess(question, fused, session_scoped=corpus_scope != PERSISTENT_SCOPE)
 
     web_search: WebSearchResult | None = None
     if not sufficiency.sufficient:

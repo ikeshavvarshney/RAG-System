@@ -15,8 +15,8 @@ TRANSIENT_RETRY_DELAYS_SEC) before it counts as an error; the retries are report
 and auth errors are never retried. By default the run stops at the first Gemini API error (after the key
 rotation's own retries). Without that, a quota
 error inside a vision call would quietly fall back to OCR and the run would carry on, hiding the problem. Pass
---continue-on-api-error to get the old behaviour. To resume after a stop, simply run it again: vision responses and
-embeddings are cached by content hash, so finished work is not paid for twice. OCR is not cached and is redone.
+--continue-on-api-error to get the old behaviour. To resume after a stop, simply run it again: vision responses,
+OCR results and embeddings are cached by content hash, so finished work is not paid for twice.
 
 --max-units N is for a canary run: it stops cleanly, before the (N+1)th uncached vision call, so exactly N paid
 calls are made. Units already in the vision cache cost nothing and do not count. Nothing is indexed on such a stop;

@@ -404,3 +404,46 @@ def test_warm_script_reports_cached_models_with_sizes(tmp_path, monkeypatch, cap
 
     assert models == {str(model): 2048}
     assert "FakeModel" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# Result cache
+# --------------------------------------------------------------------------- #
+def test_second_ocr_of_the_same_image_is_served_from_the_cache(monkeypatch):
+    monkeypatch.setattr(settings, "OCR_ENGINE", "paddle")
+    calls = []
+
+    def _paddle(image):
+        calls.append(1)
+        return "slow result"
+
+    monkeypatch.setattr(ocr_module, "run_paddle_ocr", _paddle)
+
+    assert run_ocr(_text_image()) == "slow result"
+    assert run_ocr(_text_image()) == "slow result"
+    assert len(calls) == 1
+
+
+def test_a_fallback_engine_result_is_not_cached(monkeypatch):
+    monkeypatch.setattr(settings, "OCR_ENGINE", "paddle")
+
+    def _unavailable(image):
+        raise PaddleUnavailable("not installed")
+
+    monkeypatch.setattr(ocr_module, "run_paddle_ocr", _unavailable)
+    monkeypatch.setattr(ocr_module.pytesseract, "image_to_string", lambda image: "from tesseract")
+    assert run_ocr(_text_image()) == "from tesseract"
+
+    # Paddle is back: its result must be used, not the earlier Tesseract text.
+    monkeypatch.setattr(ocr_module, "run_paddle_ocr", lambda image: "from paddle")
+    assert run_ocr(_text_image()) == "from paddle"
+
+
+def test_changing_an_ocr_setting_misses_the_cache(monkeypatch):
+    monkeypatch.setattr(settings, "OCR_ENGINE", "paddle")
+    monkeypatch.setattr(ocr_module, "run_paddle_ocr", lambda image: "at 0.5")
+    assert run_ocr(_text_image()) == "at 0.5"
+
+    monkeypatch.setattr(settings, "OCR_MIN_CONFIDENCE", 0.9)
+    monkeypatch.setattr(ocr_module, "run_paddle_ocr", lambda image: "at 0.9")
+    assert run_ocr(_text_image()) == "at 0.9"

@@ -41,3 +41,6 @@ vendor/
 # with scripts/vision_model_compare.py)
 scripts/vision_cmp_out/
 backend/data/
+
+# Server log written by scripts/e2e_week6.py
+backend/e2e_server.log

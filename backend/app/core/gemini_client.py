@@ -32,8 +32,23 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     return any(marker in blob for marker in _RATE_LIMIT_MARKERS)
 
 
+# A model overloaded server-side: worth a backed-off retry, though not a reason to block the key.
+_TRANSIENT_MARKERS = ("503", "unavailable", "high demand", "overloaded")
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    blob = f"{type(exc).__name__} {exc}".lower()
+    return _is_rate_limit_error(exc) or any(marker in blob for marker in _TRANSIENT_MARKERS)
+
+
 def _is_daily_quota_error(exc: BaseException) -> bool:
     return "perday" in str(exc).lower()
+
+
+def _billed_output_tokens(usage) -> int:
+    # Gemini bills thinking tokens at the output rate, but reports them apart from the candidates.
+    thoughts = getattr(usage, "thoughts_token_count", None)
+    return (usage.candidates_token_count or 0) + (thoughts if isinstance(thoughts, int) else 0)
 
 
 def minimal_thinking_config(max_output_tokens: int | None = None) -> types.GenerateContentConfig:
@@ -250,7 +265,7 @@ class GeminiClient:
             scope=scope,
             retries=self.max_retries if max_retries is None else max_retries,
             backoff_base=self.backoff_base,
-            is_rate_limited=_is_rate_limit_error,
+            is_rate_limited=_is_retryable_error,
             is_quota_exhausted=_is_daily_quota_error,
             exhausted_block_seconds=_DAILY_QUOTA_BLOCK_SEC,
             label="Gemini",
@@ -290,7 +305,7 @@ class GeminiClient:
                 stage=stage,
                 model=model,
                 prompt_tokens=usage.prompt_token_count,
-                output_tokens=usage.candidates_token_count,
+                output_tokens=_billed_output_tokens(usage),
             )
             return response.text
 
@@ -337,7 +352,7 @@ class GeminiClient:
                     stage=stage,
                     model=model,
                     prompt_tokens=usage.prompt_token_count or 0,
-                    output_tokens=usage.candidates_token_count or 0,
+                    output_tokens=_billed_output_tokens(usage),
                 )
             return response.text or ""
 

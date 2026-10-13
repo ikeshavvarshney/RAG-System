@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_ROOT = _REPO_ROOT / "backend"
-_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "CACHE_PATH")
+_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "OCR_CACHE_DIR", "CACHE_PATH")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -16,6 +16,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    #---Logging ---
+    LOG_LEVEL: str = "INFO"
 
 #---API key pools (comma-separated strings) ---
     GEMINI_API_KEYS: str =""
@@ -37,6 +40,7 @@ class Settings(BaseSettings):
     MAX_VISION_PAGES: int = 80
     EMBEDDING_CACHE_DIR: str = "./data/cache/embeddings"
     VISION_CACHE_DIR: str = "./data/cache/vision"
+    OCR_CACHE_DIR: str = "./data/cache/ocr"
 
 
     #--- Query pipeline (Week 4) ---
@@ -75,12 +79,15 @@ class Settings(BaseSettings):
     # Calibrated on 24 real-corpus questions: in-corpus 0.847-0.904, out-of-corpus 0.758-0.888 (adjacent topics reach 0.89).
     # A false auto-pass skips web search on a miss, which costs more than an extra LLM call, so HIGH sits above every
     # out-of-corpus score seen; LOW stays under the weakest in-corpus hit. A grey zone with no LLM verdict leans insufficient.
+    # LOW was 0.82 until answerable questions scored 0.819 (a DOCX table) and 0.801 (a broad question about one document)
+    # and were sent to web search unread; clearly out-of-corpus questions score 0.75-0.76.
     SUFFICIENCY_HIGH_THRESHOLD: float = Field(default=0.90, ge=0.0, le=1.0)
-    SUFFICIENCY_LOW_THRESHOLD: float = Field(default=0.82, ge=0.0, le=1.0)
+    SUFFICIENCY_LOW_THRESHOLD: float = Field(default=0.78, ge=0.0, le=1.0)
     SUFFICIENCY_LLM_ENABLED: bool = True
     SUFFICIENCY_LLM_MODEL: str = "gemini-3.5-flash-lite"
     SUFFICIENCY_LLM_TOP_K: int = Field(default=5, ge=1)
-    SUFFICIENCY_LLM_PASSAGE_CHARS: int = Field(default=700, ge=50)
+    # Long enough for a whole CHUNK_MAX_TOKENS passage: at 700 the verdict missed answers that sat past the cut.
+    SUFFICIENCY_LLM_PASSAGE_CHARS: int = Field(default=4000, ge=50)
     SUFFICIENCY_LLM_MAX_OUTPUT_TOKENS: int = Field(default=200, ge=16)
 
     #--- Web search fallback (Week 5) ---

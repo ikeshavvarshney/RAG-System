@@ -6,8 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_error_handlers
+from app.api.request_log import RequestLogMiddleware
 from app.api.routes import documents, health, ingest, query
 from app.core.config import settings
+from app.core.logging import configure_logging
 from app.core.warmup import warm_up_clients
 from app.shared.session_store import purge_expired
 
@@ -36,6 +38,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title="Multimodal RAG", version="0.1.0", lifespan=lifespan)
 
     app.add_middleware(
@@ -44,7 +47,10 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
+    # Added last so it wraps CORS too and sees every response, preflights included.
+    app.add_middleware(RequestLogMiddleware)
 
     register_error_handlers(app)
 

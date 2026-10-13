@@ -77,7 +77,7 @@ Full diagrams and component descriptions: [03. System Architecture](docs/03-syst
 
 | Layer | Choice |
 |---|---|
-| Language model | Google Gemini (Pro for generation, Flash for auxiliary tasks and vision) |
+| Language model | Google Gemini (`gemini-3.5-flash` for generation, `gemini-3.5-flash-lite` for auxiliary tasks and vision) |
 | Embeddings | Gemini `gemini-embedding-001` |
 | Vector store | Chroma |
 | Keyword index | BM25 (`rank_bm25`) |

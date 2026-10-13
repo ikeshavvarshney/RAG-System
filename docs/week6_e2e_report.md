@@ -1,38 +1,40 @@
 # Week 6 end-to-end report
 
-Generated 2026-10-03 18:35 by `scripts/e2e_week6.py` against the real corpus with real Gemini and Tavily keys.
+Generated 2026-10-06 10:48 by `scripts/e2e_week6.py` against the real corpus with real Gemini and Tavily keys.
 
 **Generation model: `gemini-3.5-flash`** (the key has no Pro access). Query-stage model: `gemini-3.5-flash-lite`.
 
-Questions were picked by inspecting the corpus (1342 chunks: 1316 text, 22 image_caption, 4 chart, no table).
+Questions were picked by inspecting the corpus (560 chunks: 466 text, 45 table, 26 chart, 23 image_caption).
 
 - Corpus: Nigeria refinery capacity (`eia-country-analysis-nigeria-2025.pdf`) and Indonesia installed capacity (`eia-country-analysis-indonesia-2025.pdf`): single-fact questions that the earlier sufficiency calibration confirmed are answerable.
 - Out-of-corpus: Nvidia's market capitalization, which no document covers and which needs current data.
 - Multi-part: the Nigeria and Indonesia questions joined, so each half comes from a different document.
 - Session: a small generated PDF (`zorblax-quarterly-update-2031.pdf`) about an invented company, so nothing in the corpus can answer it.
+- Table: `nasa-lunar-water-isru-modeling-2024.docx`, whose variable table gives the answer in one cell. A DOCX table exists only as a table chunk, so no text chunk can answer in its place.
 - Chart / follow-up: `census-age-groups-by-region-2026.png`, the corpus's grouped column chart of population change by age group and region.
 
 ## Environment
 
 - `HF_HUB_OFFLINE=1` for the server process; per-scenario timeout 180 s.
-- **Warm-up (not counted in any scenario time):** the app answered /api/health after 82s; the reranker warm-up finished 95s after launch (reranker loaded in 1.9s (logged by the app)).
+- **Warm-up (not counted in any scenario time):** the app answered /api/health after 51s; the reranker warm-up finished 84s after launch (reranker loaded in 1.7s (logged by the app)).
 
 
 ## Summary
 
 | # | Scenario | Result | Seconds |
 |---|---|---|---|
-| 1 | Corpus question | PASS | 20.1 |
-| 2 | Reworded question hits the cache | PASS | 2.6 |
-| 3 | Out-of-corpus question uses web fallback | PASS | 37.9 |
-| 4 | Multi-part question is decomposed | PASS | 21.0 |
-| 5 | Session upload scopes the answer | PASS | 24.3 |
+| 1 | Corpus question | PASS | 17.7 |
+| 2 | Reworded question hits the cache | PASS | 2.2 |
+| 3 | Out-of-corpus question uses web fallback | PASS | 52.9 |
+| 4 | Multi-part question is decomposed | PASS | 23.0 |
+| 5 | Session upload scopes the answer | PASS | 33.5 |
 | 6 | Greeting | PASS | 0.0 |
 | 7 | Unsafe or malformed input | PASS | 0.0 |
-| 8 | Chart question | PASS | 16.6 |
-| 9 | Follow-up question resolved in the same session | PASS | 34.5 |
-| 10 | Delete the uploaded document, then re-ask | PASS | 13.5 |
-| S | Stream a corpus question | PASS | 12.9 |
+| 8 | Table question | PASS | 28.9 |
+| 8b | Chart question | PASS | 52.5 |
+| 9 | Follow-up question resolved in the same session | PASS | 76.7 |
+| 10 | Delete the uploaded document, then re-ask | PASS | 33.4 |
+| S | Stream a corpus question | PASS | 26.6 |
 
 ## Scenario 1: Corpus question - PASS
 
@@ -43,15 +45,15 @@ Questions were picked by inspecting the corpus (1342 chunks: 1316 text, 22 image
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
 - **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, clear, and usable.)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 5989, 'by_stage': {'query_guardrail': 119, 'query_expansion': 148, 'query_sufficiency': 1083, 'query_generation': 3924, 'query_verification': 715}}
-- **Wall-clock:** 20.1s
+- **Usage:** {'total_tokens': 5175, 'by_stage': {'query_guardrail': 119, 'query_expansion': 139, 'query_generation': 4202, 'query_verification': 715}}
+- **Wall-clock:** 17.7s
 
 **Answer:**
 
 > The combined nameplate capacity of Nigeria's four state-owned refineries is 445,000 barrels per day (b/d) [1].
 
 **Citations:**
-- eia-country-analysis-nigeria-2025.pdf p.6 (ef54d75e)
+- eia-country-analysis-nigeria-2025.pdf p.6 (4f936692)
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, rerank, generation, citations, verification, output_guardrail
 
@@ -67,15 +69,15 @@ _none_
 - **cache_hit:** True | **decomposed:** False | **sub_questions:** None
 - **Groundedness score:** None | **Safety:** n/a
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 119, 'by_stage': {'query_guardrail': 119}}
-- **Wall-clock:** 2.6s
+- **Usage:** {'total_tokens': 124, 'by_stage': {'query_guardrail': 124}}
+- **Wall-clock:** 2.2s
 
 **Answer:**
 
 > The combined nameplate capacity of Nigeria's four state-owned refineries is 445,000 barrels per day (b/d) [1].
 
 **Citations:**
-- eia-country-analysis-nigeria-2025.pdf p.6 (ef54d75e)
+- eia-country-analysis-nigeria-2025.pdf p.6 (4f936692)
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache
 
@@ -89,25 +91,28 @@ _none_
 - **Expectation:** web_search stage, web citations with source_url; a repeat is cache_hit=false
 - **Resolved question:** What is the current market capitalization of Nvidia?
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
-- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, helpful, and properly grounded.)
-- **Removed claims:** none
-- **Usage:** {'total_tokens': 5253, 'by_stage': {'query_guardrail': 116, 'query_expansion': 120, 'web_search': 0, 'query_generation': 2528, 'query_verification': 2489}}
-- **Wall-clock:** 37.9s
+- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe and usable.)
+- **Removed claims:** ['uncited: The market capitalization of Nvidia is reported at different values depending on the source and date:']
+- **Usage:** {'total_tokens': 9010, 'by_stage': {'query_guardrail': 116, 'query_expansion': 115, 'web_search': 0, 'query_generation': 5803, 'query_verification': 2976}}
+- **Wall-clock:** 52.9s
 
 **Answer:**
 
-> * **$5.76 trillion:** Reported as of October 3, 2026 [1].
+> * **October 2026:** Nvidia reported a market capitalization of $5.57 trillion [1].
 > 
-> * **$5.57 trillion:** Reported in October 2026 [2].
+> * **September 18, 2026:** It was reported at $5.36 trillion [2].
 > 
-> * **$5.36 trillion:** Reported as of September 18, 2026 [3].
+> * **October 2025:** Nvidia's market capitalization opened at $5 trillion, making it the first company to cross this milestone [3].
 > 
-> Additionally, the cryptocurrency tokenized version, NVIDIA (Ondo Tokenized), has a market capitalization of $40.10 million [4].
+> * **Other Reports:** Another report states its market capitalization is hovering around $3.3 trillion [4].
+> 
+> * **Tokenized Stock:** The market capitalization of NVIDIA (Ondo Tokenized) is reported at $40.10 million [5].
 
 **Citations:**
-- https://robinhood.com/us/en/stocks/NVDA
 - https://tradingeconomics.com/nvda:us:market-capitalization
 - https://public.com/stocks/nvda/market-cap
+- https://www.youtube.com/watch?v=XxKcKQlVTjY&xstg=CAMSBhUD-7L2Hw%3D%3D
+- https://www.investing.com/analysis/is-shorting-nvda-a-smart-trade-in-current-market-conditions-200655603
 - https://cryptorank.io/price/nvidia-tokenized-stock-ondo
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, web_search, rerank, generation, citations, verification, output_guardrail
@@ -137,7 +142,7 @@ _none_
       "verification",
       "output_guardrail"
     ],
-    "seconds": 18.9
+    "seconds": 26.5
   }
 }
 ```
@@ -152,20 +157,20 @@ _none_
 - **Expectation:** decomposed=true, sub_questions listed, one answer, consistent citation numbering
 - **Resolved question:** What is the combined nameplate capacity of Nigeria's four state-owned refineries, and how much installed electricity generation capacity did Indonesia have in 2023?
 - **cache_hit:** False | **decomposed:** True | **sub_questions:** ["What is the combined nameplate capacity of Nigeria's four state-owned refineries?", 'How much installed electricity generation capacity did Indonesia have in 2023?']
-- **Groundedness score:** 1.0 | **Safety:** pass (The answer contains no harmful, unsafe, or leaked instructions, and is fully usable.)
+- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, coherent, and free of harmful content or leaked instructions.)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 10851, 'by_stage': {'query_guardrail': 136, 'query_decomposition': 219, 'query_expansion': 268, 'query_sufficiency': 2025, 'query_generation': 7010, 'query_verification': 1193}}
-- **Wall-clock:** 21.0s
+- **Usage:** {'total_tokens': 10351, 'by_stage': {'query_guardrail': 136, 'query_decomposition': 219, 'query_expansion': 269, 'query_sufficiency': 1034, 'query_generation': 7500, 'query_verification': 1193}}
+- **Wall-clock:** 23.0s
 
 **Answer:**
 
-> The combined nameplate capacity of Nigeria's four state-owned refineries is 445,000 barrels per day (b/d) [1]. In 2023, Indonesia had an installed electricity generation capacity of 70.8 gigawatts (GW) [2].
+> Nigeria's four state-owned refineries have a combined nameplate capacity of 445,000 barrels per day (b/d) [1]. In 2023, Indonesia's installed electricity generation capacity grew to 70.8 gigawatts (GW) [2].
 
 **Citations:**
-- eia-country-analysis-nigeria-2025.pdf p.6 (ef54d75e)
-- eia-country-analysis-indonesia-2025.pdf p.12 (ed1d73d8)
+- eia-country-analysis-nigeria-2025.pdf p.6 (4f936692)
+- eia-country-analysis-indonesia-2025.pdf p.12 (cb8c9e03)
 
-**Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion[1], expansion[0], retrieval[0], fusion[0], sufficiency[0], retrieval[1], fusion[1], sufficiency[1], rerank[0], rerank[1], generation, citations, verification, output_guardrail
+**Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion[1], expansion[0], retrieval[1], fusion[1], sufficiency[1], retrieval[0], fusion[0], sufficiency[0], rerank[1], rerank[0], generation, citations, verification, output_guardrail
 
 **Failure notes:**
 _none_
@@ -182,15 +187,15 @@ _none_
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
 - **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, clear, and usable.)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 1018, 'by_stage': {'query_guardrail': 121, 'query_expansion': 150, 'query_generation': 278, 'query_verification': 469}}
-- **Wall-clock:** 24.3s
+- **Usage:** {'total_tokens': 1306, 'by_stage': {'query_guardrail': 121, 'query_expansion': 152, 'query_generation': 563, 'query_verification': 470}}
+- **Wall-clock:** 33.5s
 
 **Answer:**
 
 > In the third quarter of 2031, Zorblax Industries reported a revenue of 41.7 million quetzals [1].
 
 **Citations:**
-- zorblax-quarterly-update-2031.pdf p.1 (8392012a)
+- zorblax-quarterly-update-2031.pdf p.1 (e4b2fd35)
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, rerank, generation, citations, verification, output_guardrail
 
@@ -298,24 +303,58 @@ _none_
 **Failure notes:**
 _none_
 
-## Scenario 8: Chart question - PASS
+## Scenario 8: Table question - PASS
+
+- **Question:** In the variable table of the NASA lunar water ISRU modeling document, what units are given for the Inlet_Pressure variable?
+- **Endpoint:** POST /api/query
+- **Expectation:** answer read from one cell of a table chunk (Pa), citing that chunk
+- **Resolved question:** In the variable table of the NASA lunar water ISRU modeling document, what units are given for the Inlet_Pressure variable?
+- **cache_hit:** False | **decomposed:** False | **sub_questions:** None
+- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, clear, and usable.)
+- **Removed claims:** none
+- **Usage:** {'total_tokens': 4278, 'by_stage': {'query_guardrail': 127, 'query_decomposition': 164, 'query_expansion': 146, 'web_search': 0, 'query_generation': 3269, 'query_verification': 572}}
+- **Wall-clock:** 28.9s
+
+**Answer:**
+
+> In the variable table of the NASA lunar water ISRU modeling document, the units given for the Inlet_Pressure variable are Pa [1].
+
+**Citations:**
+- nasa-lunar-water-isru-modeling-2024.docx p.None (e81d7442)
+
+**Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, web_search, rerank, generation, citations, verification, output_guardrail
+
+**Extra evidence:**
+
+```json
+{
+  "cited_chunk_types": [
+    "table"
+  ]
+}
+```
+
+**Failure notes:**
+_none_
+
+## Scenario 8b: Chart question - PASS
 
 - **Question:** According to the Census chart on how age groups are changing across regions, what was the percent change in the Under 18 population in the South between April 2020 and July 2025?
 - **Endpoint:** POST /api/query
-- **Expectation:** answer drawn from a chart (or table) chunk; report the chunk type
+- **Expectation:** answer drawn from a chart chunk
 - **Resolved question:** According to the Census chart on how age groups are changing across regions, what was the percent change in the Under 18 population in the South between April 2020 and July 2025?
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
 - **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, clear, and usable.)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 6650, 'by_stage': {'query_guardrail': 146, 'query_decomposition': 183, 'query_expansion': 185, 'query_sufficiency': 1322, 'query_generation': 3973, 'query_verification': 841}}
-- **Wall-clock:** 16.6s
+- **Usage:** {'total_tokens': 6634, 'by_stage': {'query_guardrail': 146, 'query_decomposition': 183, 'query_expansion': 184, 'query_sufficiency': 1177, 'query_generation': 4118, 'query_verification': 826}}
+- **Wall-clock:** 52.5s
 
 **Answer:**
 
-> According to the Census chart, the percent change in the Under 18 population in the South between April 2020 and July 2025 was 1.1% [1].
+> According to the Census chart, the percent change in the Under 18 population in the South between April 1, 2020, and July 1, 2025, was 1.1% [1].
 
 **Citations:**
-- census-age-groups-by-region-2026.png p.None (1be98919)
+- census-age-groups-by-region-2026.png p.None (061fef9b)
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, rerank, generation, citations, verification, output_guardrail
 
@@ -332,9 +371,6 @@ _none_
 **Failure notes:**
 _none_
 
-**Notes:**
-- The corpus holds no table chunks (text 1316, image_caption 22, chart 4), so a chart was used.
-
 ## Scenario 9: Follow-up question resolved in the same session - PASS
 
 - **Question:** And what about the West?
@@ -342,17 +378,17 @@ _none_
 - **Expectation:** resolved_question carries the earlier subject (Under 18, April 2020 - July 2025) with the West substituted
 - **Resolved question:** How did the Under 18 population in the West change between April 2020 and July 2025?
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
-- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, coherent, and usable.)
+- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, coherent, and free of harmful content or leaked instructions.)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 6713, 'by_stage': {'query_guardrail': 108, 'query_history': 270, 'query_decomposition': 166, 'query_expansion': 166, 'query_sufficiency': 1257, 'query_generation': 3872, 'query_verification': 874}}
-- **Wall-clock:** 34.5s
+- **Usage:** {'total_tokens': 6683, 'by_stage': {'query_guardrail': 108, 'query_history': 253, 'query_decomposition': 166, 'query_expansion': 180, 'query_sufficiency': 1069, 'query_generation': 4090, 'query_verification': 817}}
+- **Wall-clock:** 76.7s
 
 **Answer:**
 
-> Between April 1, 2020 and July 1, 2025, the Under 18 population in the West decreased by approximately 5.8% (or changed by ~ -5.8%) [1].
+> Between April 2020 and July 2025, the Under 18 population in the West decreased by approximately 5.8% [1].
 
 **Citations:**
-- census-age-groups-by-region-2026.png p.None (1be98919)
+- census-age-groups-by-region-2026.png p.None (061fef9b)
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, rerank, generation, citations, verification, output_guardrail
 
@@ -362,9 +398,9 @@ _none_
 {
   "first_turn": {
     "question": "How did the nationwide Under 18 population change between April 2020 and July 2025?",
-    "answer": "Between April 1, 2020, and July 1, 2025, the nationwide Under 18 population changed by approximately -2.1% (a decrease of about 2.1%) [1].",
+    "answer": "Between April 2020 and July 2025, the nationwide Under 18 population decreased by approximately 2.4 percent [1].",
     "citations": [
-      "census-age-groups-by-region-2026.png p.None (1be98919)"
+      "census-age-groups-by-region-2026.png p.None (061fef9b)"
     ]
   }
 }
@@ -380,10 +416,10 @@ _none_
 - **Expectation:** no citation to the deleted document, no stale answer, no 41.7
 - **Resolved question:** What was Zorblax Industries' revenue in the third quarter of 2031?
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
-- **Groundedness score:** 0.0 | **Safety:** pass (non-answer needs no verification)
+- **Groundedness score:** None | **Safety:** pass (non-answer needs no verification)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 4100, 'by_stage': {'query_guardrail': 121, 'query_history': 250, 'query_expansion': 151, 'web_search': 0, 'query_generation': 3578}}
-- **Wall-clock:** 13.5s
+- **Usage:** {'total_tokens': 4540, 'by_stage': {'query_guardrail': 121, 'query_history': 250, 'query_expansion': 153, 'web_search': 0, 'query_generation': 4016}}
+- **Wall-clock:** 33.4s
 
 **Answer:**
 
@@ -410,14 +446,14 @@ _none_
   "DELETE /api/session/{sid}/documents/{doc}": {
     "status": 200,
     "body": {
-      "session_id": "c9b2e1ec777a4cc3bc8bed2a16663484",
+      "session_id": "4e42f4b02eda481285c4914ebe822d5b",
       "source_doc": "zorblax-quarterly-update-2031.pdf",
       "deleted_chunks": 1,
       "invalidated_cache_entries": 0
     }
   },
   "session documents after delete": {
-    "session_id": "c9b2e1ec777a4cc3bc8bed2a16663484",
+    "session_id": "4e42f4b02eda481285c4914ebe822d5b",
     "documents": []
   }
 }
@@ -436,17 +472,17 @@ _none_
 - **Expectation:** ordered stage events, usage events, last event is result, no answer text before it
 - **Resolved question:** How much installed electricity generation capacity did Indonesia have in 2023?
 - **cache_hit:** False | **decomposed:** False | **sub_questions:** None
-- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, coherent, and directly responds to the prompt without any harmful content or instruction leaks.)
+- **Groundedness score:** 1.0 | **Safety:** pass (The answer is safe, clear, and usable.)
 - **Removed claims:** none
-- **Usage:** {'total_tokens': 5074, 'by_stage': {'query_guardrail': 118, 'query_expansion': 130, 'query_sufficiency': 932, 'query_generation': 3084, 'query_verification': 810}}
-- **Wall-clock:** 12.9s
+- **Usage:** {'total_tokens': 5625, 'by_stage': {'query_guardrail': 118, 'query_expansion': 130, 'query_sufficiency': 1037, 'query_generation': 3576, 'query_verification': 764}}
+- **Wall-clock:** 26.6s
 
 **Answer:**
 
-> In 2023, Indonesia's installed electricity generation capacity was 70.8 gigawatts (GW), representing a 1.2% growth from the previous year [1].
+> In 2023, Indonesia had an installed electricity generation capacity of 70.8 gigawatts (GW) [1].
 
 **Citations:**
-- eia-country-analysis-indonesia-2025.pdf p.12 (ed1d73d8)
+- eia-country-analysis-indonesia-2025.pdf p.12 (cb8c9e03)
 
 **Stages (completed, in order):** guardrail, greeting, guardrail_llm, greeting_llm, history, cache, decomposition, expansion, retrieval, fusion, sufficiency, rerank, generation, citations, verification, output_guardrail
 
@@ -499,8 +535,8 @@ _none_
     "output_guardrail:completed",
     "result"
   ],
-  "time_to_first_event_s": 0.05,
-  "time_to_result_s": 12.89
+  "time_to_first_event_s": 0.01,
+  "time_to_result_s": 26.64
 }
 ```
 

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.api.request_log import log_query_outcome
 from app.api.schemas import QUERY_ERRORS, QueryRequest, QueryResponse, build_query_response
 from app.api.streaming import STREAM_HEADERS, stream_query
 from app.chains import query_chain
@@ -20,14 +21,16 @@ def _session_id(request: QueryRequest) -> str:
 
 
 @router.post("/query", response_model=QueryResponse, responses=QUERY_ERRORS)
-async def query(request: QueryRequest) -> QueryResponse:
+async def query(request: QueryRequest, http: Request) -> QueryResponse:
     """Answer a question and return the whole result in one response."""
     session_id = _session_id(request)
     emitter = NullEmitter()
     result = await query_chain.ainvoke(
         {"question": request.question, "session_id": session_id, "emitter": emitter}
     )
-    return build_query_response(result, session_id, emitter)
+    response = build_query_response(result, session_id, emitter)
+    log_query_outcome(response, getattr(http.state, "request_id", None))
+    return response
 
 
 @router.post(
@@ -43,11 +46,11 @@ async def query(request: QueryRequest) -> QueryResponse:
         **{code: spec for code, spec in QUERY_ERRORS.items() if code != 500},
     },
 )
-async def query_stream(request: QueryRequest) -> StreamingResponse:
+async def query_stream(request: QueryRequest, http: Request) -> StreamingResponse:
     """Answer a question, streaming pipeline progress. The answer itself arrives only in the final event."""
     session_id = _session_id(request)
     return StreamingResponse(
-        stream_query(request.question, session_id),
+        stream_query(request.question, session_id, getattr(http.state, "request_id", None)),
         media_type="text/event-stream",
         headers=STREAM_HEADERS,
     )

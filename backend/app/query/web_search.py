@@ -58,7 +58,8 @@ def _search_once(api_key: str, query: str) -> dict[str, Any]:
             search_depth=settings.WEB_SEARCH_DEPTH,
             timeout=settings.WEB_SEARCH_TIMEOUT_SEC,
         )
-    tracker.record("web_search", "tavily", 0, 0)
+    # The depth is in the label because Tavily bills per request by depth, not by tokens.
+    tracker.record("web_search", f"tavily-{settings.WEB_SEARCH_DEPTH}", 0, 0)
     return response
 
 

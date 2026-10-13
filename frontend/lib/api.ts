@@ -1,3 +1,5 @@
+import { log, logRequest } from "@/lib/logger";
+
 export const API_BASE_URL: string =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -13,8 +15,31 @@ export function apiUrl(path: string): string {
   return `${base}/api${suffix}`;
 }
 
+/** The readable message from the backend's `{"error": {"message"}}` body. */
+export function errorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const error = (payload as { error?: { message?: unknown } }).error;
+  return typeof error?.message === "string" ? error.message : null;
+}
+
+/** fetch() against the API, logging method, path, status, duration and the backend's request id. */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const startedAt = performance.now();
+  try {
+    const response = await fetch(apiUrl(path), init);
+    logRequest(method, path, response.status, startedAt, response.headers.get("x-request-id"));
+    return response;
+  } catch (error) {
+    if (!init.signal?.aborted) {
+      logRequest(method, path, 0, startedAt, null, { error: String(error) });
+    }
+    throw error;
+  }
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
-  const response = await fetch(apiUrl("/health"), { cache: "no-store" });
+  const response = await apiFetch("/health", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
       `Health check failed: ${response.status} ${response.statusText}`,
@@ -83,7 +108,7 @@ export async function getSessionId(): Promise<string> {
   const stored = readStoredId();
   if (stored) return stored;
 
-  const response = await fetch(apiUrl("/session"), { method: "POST" });
+  const response = await apiFetch("/session", { method: "POST" });
   if (!response.ok) {
     throw new Error(`Could not start a session: ${response.status}`);
   }
@@ -111,7 +136,7 @@ export async function listSessionDocuments(): Promise<SessionDocument[]> {
   const sessionId = currentSessionId();
   if (!sessionId) return [];
 
-  const response = await fetch(apiUrl(`/session/${sessionId}/documents`), {
+  const response = await apiFetch(`/session/${sessionId}/documents`, {
     cache: "no-store",
   });
 
@@ -133,8 +158,8 @@ export async function deleteSessionDocument(sourceDoc: string): Promise<number> 
   const sessionId = currentSessionId();
   if (!sessionId) return 0;
 
-  const response = await fetch(
-    apiUrl(`/session/${sessionId}/documents/${encodeURIComponent(sourceDoc)}`),
+  const response = await apiFetch(
+    `/session/${sessionId}/documents/${encodeURIComponent(sourceDoc)}`,
     { method: "DELETE" },
   );
   if (!response.ok) {
@@ -148,7 +173,7 @@ export async function deleteSession(): Promise<boolean> {
   const sessionId = currentSessionId();
   if (!sessionId) return false;
 
-  const response = await fetch(apiUrl(`/session/${sessionId}`), {
+  const response = await apiFetch(`/session/${sessionId}`, {
     method: "DELETE",
   });
 
@@ -204,6 +229,12 @@ export function ingestFiles(
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", apiUrl("/ingest"));
+    const startedAt = performance.now();
+    const logDone = (status: number, details?: Record<string, unknown>) =>
+      logRequest("POST", "/ingest", status, startedAt, request.getResponseHeader("x-request-id"), {
+        files: files.length,
+        ...details,
+      });
 
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable && onUploadProgress) {
@@ -220,25 +251,193 @@ export function ingestFiles(
       }
 
       if (request.status >= 200 && request.status < 300) {
-        resolve(payload as IngestResponse);
+        const result = payload as IngestResponse;
+        logDone(request.status, {
+          succeeded: result.succeeded.length,
+          failed: result.failed.length,
+          chunks: result.indexed.total,
+        });
+        resolve(result);
         return;
       }
 
-      // FastAPI puts the readable message in `detail`.
-      const detail =
-        payload && typeof payload === "object" && "detail" in payload
-          ? String((payload as { detail: unknown }).detail)
-          : `${request.status} ${request.statusText || "request failed"}`;
-      reject(new Error(detail));
+      logDone(request.status, { error: errorMessage(payload) });
+      reject(
+        new Error(
+          errorMessage(payload) ??
+            `${request.status} ${request.statusText || "request failed"}`,
+        ),
+      );
     });
 
     request.addEventListener("error", () => {
+      logDone(0);
       reject(new Error(`Cannot reach the backend at ${API_BASE_URL}`));
     });
     request.addEventListener("abort", () => {
+      log("info", "POST /ingest cancelled");
       reject(new Error("Upload cancelled"));
     });
 
     request.send(body);
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Query                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface CorpusCitation {
+  kind: "corpus";
+  source_doc: string;
+  page: number | null;
+  chunk_id: string;
+  score: number | null;
+  snippet: string;
+}
+
+export interface WebCitation {
+  kind: "web";
+  source_url: string;
+  title: string;
+  score: number | null;
+  snippet: string;
+}
+
+export type Citation = CorpusCitation | WebCitation;
+
+export interface StageTiming {
+  stage: string;
+  status: "completed" | "failed";
+  duration_ms: number | null;
+  sub_question: number | null;
+}
+
+export interface StageUsage {
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface UsageSummary extends StageUsage {
+  by_stage: Record<string, StageUsage>;
+}
+
+export interface ClaimVerdict {
+  index: number;
+  text: string;
+  markers: number[];
+  supported: boolean;
+  reason: string;
+}
+
+export interface QueryResponse {
+  session_id: string;
+  answer: string;
+  citations: Citation[];
+  stages: StageTiming[];
+  cache_hit: boolean;
+  decomposed: boolean;
+  sub_questions: string[] | null;
+  raw_question: string;
+  resolved_question: string;
+  usage: UsageSummary;
+  groundedness: { claims: ClaimVerdict[]; score: number | null } | null;
+  safety: {
+    verdict: "pass" | "fail";
+    reason: string;
+    source: "deterministic" | "llm";
+  } | null;
+  removed_claims: { text: string; reason: string }[];
+}
+
+export interface StageEvent {
+  stage: string;
+  status: "started" | "completed" | "failed";
+  duration_ms?: number;
+  sub_question?: number;
+}
+
+export interface UsageEvent {
+  stage: string;
+  model: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface QueryHandlers {
+  onStage?: (event: StageEvent) => void;
+  onUsage?: (event: UsageEvent) => void;
+}
+
+/** Ask a question over the SSE endpoint. Resolves with the terminal `result`. */
+export async function streamQuery(
+  question: string,
+  handlers: QueryHandlers = {},
+  signal?: AbortSignal,
+): Promise<QueryResponse> {
+  const sessionId = await getSessionId();
+  const startedAt = performance.now();
+  let response: Response;
+  try {
+    response = await apiFetch("/query/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, session_id: sessionId }),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`Cannot reach the backend at ${API_BASE_URL}`);
+  }
+
+  if (!response.ok || !response.body) {
+    const payload: unknown = await response.json().catch(() => null);
+    if (response.status === 400) writeStoredId(null);
+    throw new Error(errorMessage(payload) ?? `Query failed: ${response.status}`);
+  }
+
+  const requestId = response.headers.get("x-request-id");
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value.replace(/\r\n/g, "\n");
+
+    let boundary: number;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+
+      let name = "message";
+      const data: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (data.length === 0) continue;
+      const payload = JSON.parse(data.join("\n"));
+
+      if (name === "stage") handlers.onStage?.(payload as StageEvent);
+      else if (name === "usage") handlers.onUsage?.(payload as UsageEvent);
+      else if (name === "result") {
+        const result = payload as QueryResponse;
+        log("info", `query answered in ${Math.round(performance.now() - startedAt)}ms`, {
+          requestId,
+          cacheHit: result.cache_hit,
+          citations: result.citations.length,
+          groundedness: result.groundedness?.score ?? null,
+          tokens: result.usage.total_tokens,
+        });
+        return result;
+      } else if (name === "error") {
+        log("error", "query stream sent an error event", { requestId, ...payload });
+        throw new Error(errorMessage({ error: payload }) ?? "The query failed.");
+      }
+    }
+  }
+  log("error", "query stream closed before a result", { requestId });
+  throw new Error("The stream closed before an answer arrived.");
 }

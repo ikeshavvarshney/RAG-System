@@ -6,6 +6,7 @@ Starts the app with uvicorn, drives it over HTTP with httpx, and writes docs/wee
 first quota or API error. API keys are never printed.
 """
 
+import collections
 import io
 import json
 import os
@@ -41,6 +42,10 @@ Q_SESSION = "What was Zorblax Industries' revenue in the third quarter of 2031?"
 Q_CHART = (
     "According to the Census chart on how age groups are changing across regions, what was the percent "
     "change in the Under 18 population in the South between April 2020 and July 2025?"
+)
+Q_TABLE = (
+    "In the variable table of the NASA lunar water ISRU modeling document, what units are given for the "
+    "Inlet_Pressure variable?"
 )
 Q_FOLLOW_1 = "How did the nationwide Under 18 population change between April 2020 and July 2025?"
 Q_FOLLOW_2 = "And what about the West?"
@@ -176,7 +181,12 @@ _API_ERROR = re.compile(r"429|RESOURCE_EXHAUSTED|quota|ClientError|ServerError|P
 
 
 def _error_lines(log_text: str) -> str:
-    lines = [ln for ln in log_text.splitlines() if not ln.startswith("INFO e2e.trace") and _API_ERROR.search(ln)]
+    # Request-log lines carry ids and durations that can contain "429" by chance.
+    lines = [
+        ln
+        for ln in log_text.splitlines()
+        if not ln.startswith("INFO e2e.trace") and "app.requests" not in ln and _API_ERROR.search(ln)
+    ]
     return "\n".join(lines[:12])
 
 
@@ -374,15 +384,25 @@ def run_scenarios(runner: Runner) -> None:
     r.check(bad.status_code == 400 and bad.json().get("error", {}).get("code") == "bad_request", "bad session id not a 400 error body")
     runner.records.append(r)
 
-    # 8. chart question
-    r = Record("8", "Chart question", expectation="answer drawn from a chart (or table) chunk; report the chunk type")
+    # 8. table-dependent question
+    r = Record("8", "Table question", expectation="answer read from one cell of a table chunk (Pa), citing that chunk")
+    runner.begin(r)
+    body = runner.query(r, Q_TABLE, session())
+    types = runner.chunk_type_of(body["citations"])
+    r.extra["cited_chunk_types"] = types
+    r.check(bool(body["citations"]), "no citations")
+    r.check("table" in types, f"no table chunk cited; chunk types: {types}")
+    r.check(bool(re.search(r"\bPa\b|pascal", r.answer)), "answer does not give the table's value (Pa)")
+    runner.records.append(r)
+
+    # 8b. chart question
+    r = Record("8b", "Chart question", expectation="answer drawn from a chart chunk")
     runner.begin(r)
     body = runner.query(r, Q_CHART, session())
     types = runner.chunk_type_of(body["citations"])
     r.extra["cited_chunk_types"] = types
     r.check(bool(body["citations"]), "no citations")
-    r.check(any(t in ("chart", "table") for t in types), f"no chart/table chunk cited; chunk types: {types}")
-    r.notes.append("The corpus holds no table chunks (text 1316, image_caption 22, chart 4), so a chart was used.")
+    r.check("chart" in types, f"no chart chunk cited; chunk types: {types}")
     runner.records.append(r)
 
     # 9. follow-up in the same session
@@ -549,13 +569,17 @@ def main() -> int:
     if cache_size:
         print(f"answer cache is not empty ({cache_size} entries); the run requires an empty cache", file=sys.stderr)
         return 2
+    counts = collections.Counter(chunk_types.values())
+    breakdown = ", ".join(f"{n} {kind}" for kind, n in counts.most_common())
     preface = (
-        "Questions were picked by inspecting the corpus (1342 chunks: 1316 text, 22 image_caption, 4 chart, no table).\n\n"
+        f"Questions were picked by inspecting the corpus ({len(chunk_types)} chunks: {breakdown}).\n\n"
         f"- Corpus: Nigeria refinery capacity (`eia-country-analysis-nigeria-2025.pdf`) and Indonesia installed capacity "
         f"(`eia-country-analysis-indonesia-2025.pdf`): single-fact questions that the earlier sufficiency calibration confirmed are answerable.\n"
         "- Out-of-corpus: Nvidia's market capitalization, which no document covers and which needs current data.\n"
         "- Multi-part: the Nigeria and Indonesia questions joined, so each half comes from a different document.\n"
         f"- Session: a small generated PDF (`{UPLOAD_NAME}`) about an invented company, so nothing in the corpus can answer it.\n"
+        "- Table: `nasa-lunar-water-isru-modeling-2024.docx`, whose variable table gives the answer in one cell. A DOCX "
+        "table exists only as a table chunk, so no text chunk can answer in its place.\n"
         "- Chart / follow-up: `census-age-groups-by-region-2026.png`, the corpus's grouped column chart of population change by age group and region.\n"
     )
     server = Server()
