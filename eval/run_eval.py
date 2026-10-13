@@ -146,7 +146,7 @@ async def run_question(q: dict) -> dict:
     began = time.perf_counter()
     record = {**q, "session_id": session_id}
     try:
-        result = await run_query(q["question"], session_id)
+        result = await run_query(q["question"], session_id, bypass_cache=True)
     except Exception as exc:  # noqa: BLE001 - one failed question must not lose the rest of the run
         record.update(error=f"{type(exc).__name__}: {exc}", terminated_at=None, answer=None, contexts=[], citations=[])
     else:

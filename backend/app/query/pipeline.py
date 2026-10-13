@@ -312,7 +312,10 @@ async def _write_cache(raw_question: str, resolved_question: str, final: FinalAn
 
 
 async def run_query(
-    question: str, session_id: str, on_event: EventCallback | None = None
+    question: str,
+    session_id: str,
+    on_event: EventCallback | None = None,
+    bypass_cache: bool = False,
 ) -> QueryResult:
     @contextmanager
     def stage(name: Stage, sub_question: int | None = None) -> Iterator[None]:
@@ -357,7 +360,7 @@ async def run_query(
     )
 
     with stage("cache"):
-        hit = await _lookup_cache(resolved_question, corpus_scope)
+        hit = None if bypass_cache else await _lookup_cache(resolved_question, corpus_scope)
     if hit is not None:
         record_turn(session_id, sanitized, resolved_question, summarize_answer(hit.answer))
         return QueryResult(
@@ -384,7 +387,8 @@ async def run_query(
             sub_contexts=[(sub.question, sub.context) for sub in sub_queries],
             corpus_scope=corpus_scope,
         )
-        await _write_cache(sanitized, resolved_question, final, corpus_scope)
+        if not bypass_cache:
+            await _write_cache(sanitized, resolved_question, final, corpus_scope)
         record_turn(session_id, sanitized, resolved_question, final.summary)
         return QueryResult(
             "retrieved",
@@ -409,7 +413,8 @@ async def run_query(
     final = await finalize_answer(
         resolved_question, stage, passages=ranked.context.passages, corpus_scope=corpus_scope
     )
-    await _write_cache(sanitized, resolved_question, final, corpus_scope)
+    if not bypass_cache:
+        await _write_cache(sanitized, resolved_question, final, corpus_scope)
     record_turn(session_id, sanitized, resolved_question, final.summary)
     return QueryResult(
         "retrieved",
