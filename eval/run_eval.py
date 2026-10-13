@@ -57,6 +57,8 @@ UNSCORED_CATEGORIES = {"out_of_corpus"}
 MAX_WAIT_SEC = 65.0
 MAX_ATTEMPTS = 12
 COVERAGE_WARNING = 80.0
+ERROR_LIMIT = 0.10
+RUN_INVALID_EXIT = 6
 METRIC_NAMES = ("faithfulness", "answer_relevancy", "context_precision", "context_recall")
 
 
@@ -266,7 +268,21 @@ def answer_source(contexts: list[dict]) -> str:
     return "mixed"
 
 
+def is_error(record: dict) -> bool:
+    return bool(record.get("error")) or record.get("terminated_at") is None
+
+
+def normalise(records: list[dict]) -> list[dict]:
+    for r in records:
+        failed = is_error(r)
+        r["status"] = "error" if failed else "ok"
+        r["answer_source"] = None if failed else r.get("answer_source") or answer_source(r["contexts"])
+    return records
+
+
 def oos_outcome(record: dict) -> str:
+    if is_error(record):
+        return "error"
     if record["answer_source"] in ("web", "mixed"):
         return "web_fallback"
     if record.get("non_answer") or not record.get("answer"):
@@ -316,9 +332,8 @@ async def run_question(q: dict) -> dict:
     finally:
         pipeline_logger.removeHandler(capture)
     record["retrieval_log"] = capture.lines
-    record["answer_source"] = answer_source(record["contexts"])
     record["wall_clock_sec"] = round(time.perf_counter() - began, 2)
-    return record
+    return normalise([record])[0]
 
 
 def write_json(path: Path, payload) -> None:
@@ -353,7 +368,7 @@ async def run_pipeline(
         records[q["id"]] = record
         ordered = [records[x["id"]] for x in questions if x["id"] in records]
         write_json(raw_path, {"run_name": run_name, "config": config, "questions": ordered})
-        print(f"[{q['id']}] {record['terminated_at']} {record['answer_source']} {record['wall_clock_sec']}s", flush=True)
+        print(f"[{q['id']}] {record['status']} {record['terminated_at']} {record['answer_source']} {record['wall_clock_sec']}s", flush=True)
         if record["terminated_at"] == "cache_hit":
             break
     return [records[q["id"]] for q in questions if q["id"] in records]
@@ -627,7 +642,8 @@ def _aggregate(rows: list[dict]) -> dict:
 
 
 def split_summary(records: list[dict]) -> dict:
-    graded = [r for r in records if r["category"] not in UNSCORED_CATEGORIES]
+    errors = [r for r in records if is_error(r)]
+    graded = [r for r in records if r["category"] not in UNSCORED_CATEGORIES and not is_error(r)]
     counts = {s: sum(r["answer_source"] == s for r in graded) for s in SOURCES}
     total = len(graded)
     percent = {s: round(100.0 * counts[s] / total, 1) if total else 0.0 for s in SOURCES}
@@ -637,6 +653,10 @@ def split_summary(records: list[dict]) -> dict:
         "percent": percent,
         "corpus_coverage_percent": percent["corpus"],
         "low_corpus_coverage": bool(total) and percent["corpus"] < COVERAGE_WARNING,
+        "errors": len(errors),
+        "error_ids": [r["id"] for r in errors],
+        "total_questions": len(records),
+        "run_invalid": bool(records) and len(errors) / len(records) > ERROR_LIMIT,
     }
 
 
@@ -652,6 +672,18 @@ def build_scored(
     source_of = {r["id"]: r["answer_source"] for r in records}
     rows = [{**r, "answer_source": source_of[r["id"]]} for r in rows]
     ok = [r for r in rows if r["status"] == "ok"]
+    errored = [
+        {
+            "id": r["id"],
+            "category": r["category"],
+            "status": "error",
+            "reason": r.get("error") or "pipeline call failed",
+            "answer_source": None,
+            "scores": {name: None for name in METRIC_NAMES},
+        }
+        for r in records
+        if is_error(r)
+    ]
     by_source = {s: [r for r in ok if r["answer_source"] == s] for s in SOURCES}
     return {
         "run_name": run_name,
@@ -677,16 +709,26 @@ def build_scored(
             for r in records
             if r["category"] in UNSCORED_CATEGORIES
         ],
-        "per_question": rows,
+        "per_question": rows + errored,
+        "errors": [{"id": r["id"], "reason": r["reason"]} for r in errored],
         "failed": [{"id": r["id"], "failures": r["failures"]} for r in rows if r["status"] == "failed"],
         "skipped": skipped,
     }
 
 
-def print_split(split: dict) -> None:
+def print_split(split: dict, records: list[dict] | None = None) -> None:
+    ids = f" ({', '.join(split['error_ids'])})" if split["errors"] else ""
+    print(f"errors: {split['errors']}{ids}")
+    for r in records or []:
+        if is_error(r):
+            print(f"  {r['id']}: {(r.get('error') or 'pipeline call failed')[:200]}")
+    if split["run_invalid"]:
+        message = f"RUN INVALID: too many errors ({split['errors']} of {split['total_questions']} questions errored, limit {ERROR_LIMIT:.0%})"
+        print(message)
+        print(message, file=sys.stderr)
     counts, percent = split["counts"], split["percent"]
     summary = ", ".join(f"{s}={counts[s]} ({percent[s]}%)" for s in SOURCES)
-    print(f"ANSWER SOURCE SPLIT ({split['questions']} graded questions): {summary}")
+    print(f"ANSWER SOURCE SPLIT ({split['questions']} graded questions, errors excluded): {summary}")
     if split["low_corpus_coverage"]:
         print(f"WARNING: corpus-only coverage {percent['corpus']}% is below {COVERAGE_WARNING:.0f}%; ablation deltas rest on a small subset")
 
@@ -694,6 +736,8 @@ def print_split(split: dict) -> None:
 def skip_reason(record: dict) -> str:
     if record["category"] in UNSCORED_CATEGORIES:
         return "out_of_corpus"
+    if is_error(record):
+        return f"error: {record.get('error') or 'pipeline call failed'}"
     return record.get("error") or (record["terminated_at"] if record["terminated_at"] != "retrieved" else None) or (
         "no answer" if not record["answer"] else "no contexts" if not record["contexts"] else "no reference answer"
     )
@@ -751,8 +795,7 @@ def run(args, overrides: dict) -> int:
         config = raw.get("config")
         records = [r for r in raw["questions"] if wanted is None or r["id"] in wanted]
         records = records[: args.limit] if args.limit else records
-        for r in records:
-            r.setdefault("answer_source", answer_source(r["contexts"]))
+        normalise(records)
     else:
         config = effective_config(args.preset, overrides)
     print("effective config:", json.dumps(config["effective"] if config else None), flush=True)
@@ -776,8 +819,10 @@ def run(args, overrides: dict) -> int:
             return 2
         finished = {}
         if raw_path.exists():
-            finished = {r["id"]: r for r in json.loads(raw_path.read_text(encoding="utf-8"))["questions"] if not r.get("error")}
-            print(f"resuming pipeline: {len(finished)} of {len(questions)} already run")
+            stored_records = normalise(json.loads(raw_path.read_text(encoding="utf-8"))["questions"])
+            finished = {r["id"]: r for r in stored_records if not is_error(r)}
+            retried = [r["id"] for r in stored_records if is_error(r)]
+            print(f"resuming pipeline: {len(finished)} of {len(questions)} already run; retrying errored: {retried}")
         records = asyncio.run(run_pipeline(questions, raw_path, args.run_name, finished, config))
         print(f"raw results: {raw_path}")
         hits = [r["id"] for r in records if r["terminated_at"] == "cache_hit"]
@@ -785,8 +830,9 @@ def run(args, overrides: dict) -> int:
             print(f"ABORT: answer cache hit on {hits}; not scoring. Clear CACHE_PATH and rerun.", file=sys.stderr)
             return 3
         if args.no_score:
-            print_split(split_summary(records))
-            return 0
+            split = split_summary(records)
+            print_split(split, records)
+            return RUN_INVALID_EXIT if split["run_invalid"] else 0
 
     to_score = [r for r in records if scorable(r)]
     skipped = [{"id": r["id"], "reason": skip_reason(r)} for r in records if not scorable(r)]
@@ -816,12 +862,14 @@ def run(args, overrides: dict) -> int:
     rows = [previous[r["id"]] for r in to_score if r["id"] in previous]
     scored = build_scored(args.run_name, args.from_raw, judge_model, config, records, rows, skipped)
     write_json(scored_path, scored)
-    print_split(scored["split"])
-    summary = {"aggregate": scored["aggregate"], "out_of_corpus": scored["out_of_corpus"], "judge_usage": scored["judge_usage"]}
+    print_split(scored["split"], records)
+    summary ={"aggregate": scored["aggregate"], "out_of_corpus": scored["out_of_corpus"], "judge_usage": scored["judge_usage"]}
     print(json.dumps(summary, indent=2))
     if scored["failed"]:
         print("FAILED questions:", ", ".join(f"{f['id']} ({'; '.join(f['failures'])[:150]})" for f in scored["failed"]))
     print(f"scored results: {scored_path}")
+    if scored["split"]["run_invalid"]:
+        return RUN_INVALID_EXIT
     return 1 if scored["failed"] else 0
 
 
