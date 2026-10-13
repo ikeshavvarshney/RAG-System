@@ -95,9 +95,13 @@ From `frontend/`:
 npm run dev
 ```
 
-Serves on http://localhost:3000, with the overview page at `/` and the chat at `/chat`.
+Serves on http://localhost:3000, with the overview page at `/`, the chat at `/chat`, and the evaluation dashboard at `/evaluation`.
 
 Questions asked in the chat go to `POST /api/query/stream`. While the pipeline runs the chat lists each stage as it starts and finishes; the answer then shows numbered citations (a document and page, or a web URL), a fact-check score, and an expandable breakdown of tokens and estimated cost per stage. The cost uses the Gemini list prices in `frontend/lib/pricing.ts`; update them there if the models or prices change.
+
+**Document viewer.** A document opens beside the conversation from three places: a document citation under an answer, a file in the session upload list, or the corpus list in the documents rail. A PDF is shown page by page, and when it was opened from a citation, the cited passage is highlighted on pages that have a text layer. An image is shown as itself. A DOCX has no fixed pages, so it shows its extracted text. The "Extracted text" tab shows what was indexed from the current page, labelled by how it was obtained (text layer, vision model, or OCR), which is the quickest way to check a table or chart transcription against the page it came from.
+
+The viewer needs the original file. Uploads keep theirs: corpus uploads in `backend/data/documents/`, session uploads inside the session's own directory, removed with the document or the session. For the corpus ingested by the script, originals are read from `data/corpus/files/`. When no original is found, the viewer still shows the indexed text.
 
 **Logs.** The backend logs one line per request (`METHOD path status duration id=<request id>`) and one summary line per answered query, at the level set by `LOG_LEVEL` in `backend/.env` (default `INFO`; health checks log at `DEBUG`). The frontend logs the same request line to the browser console with an `[api]` prefix, at `NEXT_PUBLIC_LOG_LEVEL` in `frontend/.env.local`. Both sides print the same request id (the `X-Request-ID` response header), so a browser line can be matched to its backend line.
 
@@ -246,6 +250,7 @@ Tesseract returns text in reading order and does not recover table rows and colu
 | Path | Contents | Tracked |
 |---|---|---|
 | `backend/data/chroma/` | Vector store and keyword index | No |
+| `backend/data/documents/` | Originals of documents uploaded to the corpus, for the document viewer | No |
 | `backend/data/cache/vision/` | Cached vision responses, keyed by image | No |
 | `backend/data/cache/ocr/` | Cached OCR text, keyed by image | No |
 | `backend/data/cache/embeddings/` | Cached embeddings | No |
@@ -271,3 +276,54 @@ Leave the caches in place unless you are deliberately re-testing extraction: del
 **Every figure comes back as `ocr` and none as `vision`.** The vision calls are failing. Check `GEMINI_API_KEYS` is set and that the log does not show repeated rate limits; the fallback is deliberate and silent by design, so the log is the only place it shows.
 
 **Ingestion appears to hang.** It is most likely working. A figure sent to vision takes 15 to 30 seconds, the request returns only when the whole batch is finished, and nothing is logged per page. Splitting the corpus into smaller batches keeps each run short.
+
+---
+
+## 8.10 Running the Evaluation
+
+The RAGAS harness lives in `eval/` and needs its own extra, installed from `backend/`:
+
+```bash
+pip install -e ".[eval]"
+```
+
+The judge is a Groq-hosted model rather than Gemini, so that answers are not scored by the model family that wrote them. Set `GROQ_EVAL_API_KEYS` (comma-separated) and `GROQ_EVAL_MODEL` in `backend/.env`.
+
+Run from the repository root. The harness sends each question in `data/eval/reference_set.json` through the live pipeline with the answer cache bypassed, saves the raw results, then scores one question at a time:
+
+```bash
+python eval/run_eval.py --audit                        # report on the reference set and exit
+python eval/run_eval.py --run-name baseline --limit 5  # first 5 questions
+python eval/run_eval.py --run-name baseline --resume   # continue a run that stopped partway
+python eval/run_eval.py --from-raw baseline            # score saved raw results without re-running the pipeline
+```
+
+Results are written to `eval/results/` (git-ignored) as `<run-name>.raw.json` and `<run-name>.scored.json`. Each question is labelled by where its answer came from (corpus, web, mixed, or none).
+
+A run can change pipeline settings without touching `backend/.env`:
+
+```bash
+python eval/run_eval.py --run-name dense-only --set FUSION_DENSE_WEIGHT=1.0   # one override, repeatable
+python eval/run_eval.py --run-name naive --preset naive                       # the naive baseline
+```
+
+The `naive` preset is dense-only retrieval with no expansion, reranking, or decomposition, read from a separate fixed-size-chunk index. Build that index once, from `backend/`:
+
+```bash
+python scripts/ingest_naive.py --dry-run     # count chunks, embed nothing
+python scripts/ingest_naive.py               # build data/chroma_naive
+```
+
+### From the browser
+
+The evaluation page at http://localhost:3000/evaluation shows every run in `eval/results/`: the four metric averages, where answers came from, scores by question category, and each question with its answer beside the reference answer. Choosing a second run under "Compare with" shows the difference per metric over the questions both runs answered from the corpus.
+
+The same page can start a run. It takes a run name, either the first N questions or the whole set, and one of three configurations (full pipeline, naive baseline, or a chosen fusion weight), then shows progress and the tail of the log while the harness runs. The backend starts `eval/run_eval.py` as a child process, one run at a time, through `POST /api/eval/runs`. A run that was stopped can be resumed under the same name.
+
+### Comparing runs from a terminal
+
+Compare two scored runs, using only the questions both answered from the corpus:
+
+```bash
+python eval/compare_runs.py baseline naive
+```

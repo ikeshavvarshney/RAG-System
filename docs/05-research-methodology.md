@@ -169,7 +169,7 @@ Supporting measurements:
 
 The OCR condition uses Tesseract, a reading-order engine: it returns the words on a page in the order they are read and does not recover table rows and columns.
 
-This choice materially affects what the experiment measures. A structure-aware OCR engine (PaddleOCR's PP-Structure) was the planned baseline and was removed on cost grounds: it took roughly 75 seconds per page on the project's CPU-only hardware, and plain PaddleOCR recognition up to 6 minutes per page on the slower machine. With a reading-order baseline, part of any observed difference is attributable to structured versus unstructured output rather than to vision-language understanding specifically.
+This choice materially affects what the experiment measures. A structure-aware OCR engine, one that recovers table rows and columns, was the planned baseline and was dropped on cost grounds: it took roughly 75 seconds per page on the project's CPU-only hardware. With a reading-order baseline, part of any observed difference is attributable to structured versus unstructured output rather than to vision-language understanding specifically.
 
 The consequence is a larger expected effect size and a narrower claim. The result supports the statement that vision extraction outperforms conventional reading-order OCR on table and chart questions. It does not separate how much of that gain a structure-aware OCR engine would also have delivered. This is recorded as a threat to validity in section 5.6.
 

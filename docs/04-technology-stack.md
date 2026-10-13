@@ -6,14 +6,15 @@ Every component listed below is accompanied by the reason it was selected over t
 
 ## 4.1 Models
 
-Large-model inference is performed through hosted APIs. Two small models run locally on CPU, in both cases because doing so is faster and cheaper than the equivalent API call rather than as a compromise.
+Large-model inference is performed through hosted APIs. A few small models run locally on CPU, in each case because doing so is faster and cheaper than the equivalent API call rather than as a compromise.
 
 | Model | Location | Role |
 |---|---|---|
 | Gemini `gemini-3.5-flash` | API | Final answer generation with inline citations |
-| Gemini `gemini-3.5-flash-lite` | API | Vision extraction, groundedness and safety verification, query expansion, decomposition, conversational resolution, guardrails, sufficiency assessment |
+| Gemini `gemini-3.5-flash-lite` | API | Vision extraction, groundedness and safety verification, query expansion, decomposition, conversational resolution, guardrails, sufficiency assessment, web query rewriting |
 | Gemini `gemini-embedding-001` | API | Dense embeddings for passages and queries |
 | `ms-marco-MiniLM-L-6-v2` | Local, CPU | Cross-encoder reranking |
+| `all-MiniLM-L6-v2` | Local, CPU | Relevance filter for web search results |
 | Tesseract | Local, CPU | OCR for scanned pages and as the fallback for the vision path |
 
 ### Selection rationale
@@ -26,7 +27,7 @@ Large-model inference is performed through hosted APIs. Two small models run loc
 
 **Local cross-encoder for reranking.** A 22-million-parameter cross-encoder executes in tens of milliseconds on CPU. A hosted reranking API was considered and rejected: it would have added a network round trip to every query, a third credential pool, and a third rate limit, in exchange for quality that the local model broadly matches at this corpus size. Should reranking prove to be the accuracy bottleneck during evaluation, a larger cross-encoder remains available as a drop-in replacement: more accurate, still CPU-viable, and measurably slower.
 
-**Tesseract as the only OCR engine.** PaddleOCR was the original choice, with its PP-Structure component as a structure-aware baseline for RQ2, and it was removed after measurement. On the project's CPU-only hardware plain PaddleOCR recognition took between 3 seconds and 6 minutes per page depending on the machine, and PP-Structure roughly 75 seconds per page, so scanning the corpus's 30 scanned pages could take over an hour. Tesseract reads a page in about a second, installs as one binary rather than seventy Python packages, and downloads no model weights. The cost is that Tesseract returns words in reading order and does not recover table rows and columns. For ordinary ingestion that matters little, because tables and charts on digital pages go to the vision model and OCR handles only scanned pages and vision failures. For RQ2 it changes what the OCR baseline is, which is recorded in the research methodology. See D-27.
+**Tesseract as the only OCR engine.** Tesseract reads a scanned page in under a second on the project's CPU-only hardware (two pages of the scanned corpus PDF measured 1.6 seconds through the extractor), installs as a single binary, and downloads no model weights. A heavier engine with table structure recognition was tried first and dropped: it took from seconds to minutes per page on the same hardware, which made scanning the corpus's 30 scanned pages the slowest part of ingestion. The cost of the choice is that Tesseract returns words in reading order and does not recover table rows and columns. For ordinary ingestion that matters little, because tables and charts on digital pages go to the vision model and OCR handles only scanned pages and vision failures. For RQ2 it defines what the OCR baseline is, which is recorded in the research methodology. See D-27.
 
 **Embedding model choice and its limitation.** Larger open-weight embedding models currently achieve better retrieval benchmark results than the hosted model used here. They were not adopted because self-hosting one requires GPU memory well beyond what is available. This is recorded as a limitation in the research methodology rather than presented as a neutral choice: retrieval results reported by this project are conditioned on one embedding model, and a stronger model would plausibly shift the baseline.
 
@@ -146,7 +147,7 @@ RAGAS itself invokes a language model to produce its judgments, so an evaluation
 | Large open-weight embedding models | Better retrieval quality, but memory requirements exceed available hardware. Recorded as a limitation and revisited in future work |
 | Hosted vector databases | Unwarranted infrastructure at this corpus size; local storage also simplifies the parallel indexes RQ2 requires |
 | Elasticsearch or equivalent | Same reasoning applied to sparse retrieval |
-| PaddleOCR and PP-Structure | Adopted first, then removed: seconds to minutes per page on CPU against about one second for Tesseract (D-27) |
+| Structure-aware OCR engines | Recover table rows and columns, but took from seconds to minutes per page on CPU against under one second for Tesseract (D-27) |
 | Dedicated guardrails frameworks | Rigorous, but guardrails are two requirements here rather than a research focus. Cited in related work as the established alternative |
 | Authentication and multi-user support | Future scope; the current deliverable is a single-user academic demonstration |
 | Containerisation and orchestration | Future scope, alongside public deployment; the system currently runs locally |

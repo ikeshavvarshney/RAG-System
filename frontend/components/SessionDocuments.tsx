@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useOpenViewer } from "@/components/DocumentViewer";
 import {
   deleteSessionDocument,
   listSessionDocuments,
@@ -18,6 +19,7 @@ export default function SessionDocuments({ refreshToken, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
+  const openViewer = useOpenViewer();
 
   // Fetched on mount and after each mutation, never polled: this client is the
   // only writer to its own session, so there is nothing to discover on a timer.
@@ -56,41 +58,54 @@ export default function SessionDocuments({ refreshToken, onChanged }: Props) {
   }
 
   if (error) {
-    return <p className="mt-3 text-sm text-red-600">{error}</p>;
+    return (
+      <p role="alert" className="mt-3 text-xs text-bad">
+        {error}
+      </p>
+    );
   }
 
   if (documents.length === 0) {
-    return null;
+    return (
+      <p className="mt-4 text-xs leading-relaxed text-muted">
+        Nothing uploaded to this session yet. While it holds documents,
+        questions are answered from those alone.
+      </p>
+    );
   }
 
   return (
     <div className="mt-4">
-      <h3 className="text-xs font-medium text-neutral-500">
+      <h3 className="text-xs font-medium text-ink-2">
         In this session ({documents.length})
       </h3>
 
-      <ul className="mt-2 space-y-1">
+      <ul className="mt-2 divide-y divide-line border-y border-line">
         {documents.map((document) => (
-          <li
-            key={document.source_doc}
-            className="flex items-center gap-3 text-sm"
-          >
-            <span className="truncate text-neutral-700">
-              {document.source_doc}
-            </span>
-            <span className="shrink-0 text-xs text-neutral-400">
-              {document.chunk_count} passage
-              {document.chunk_count === 1 ? "" : "s"}
-              {document.pages !== null && `, ${document.pages}p`}
-            </span>
+          <li key={document.source_doc} className="flex items-center gap-2 py-1.5 text-sm">
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={() => openViewer({ sourceDoc: document.source_doc })}
+                title={`Open ${document.source_doc}`}
+                className="block max-w-full truncate text-left text-ink underline decoration-line-strong hover:decoration-ink"
+              >
+                {document.source_doc}
+              </button>
+              <p className="tnum text-xs text-muted">
+                {document.chunk_count} passage
+                {document.chunk_count === 1 ? "" : "s"}
+                {document.pages !== null && `, ${document.pages} pages`}
+              </p>
+            </div>
             <button
               type="button"
               onClick={() => handleRemove(document.source_doc)}
               disabled={removing !== null}
               aria-label={`Remove ${document.source_doc}`}
-              className="ml-auto shrink-0 text-xs text-neutral-400 hover:text-neutral-900 disabled:opacity-40"
+              className="ml-auto shrink-0 text-xs text-ink-2 underline decoration-line-strong hover:text-ink disabled:opacity-40"
             >
-              {removing === document.source_doc ? "removing..." : "remove"}
+              {removing === document.source_doc ? "Removing" : "Remove"}
             </button>
           </li>
         ))}

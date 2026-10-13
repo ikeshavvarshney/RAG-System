@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from app.api.schemas import ERRORS, DeleteDocumentResponse, DocumentInfo, DocumentList
 from app.ingestion.indexer import get_keyword_index, get_vector_store
 from app.query import cache
+from app.shared import document_files
 from app.shared.session_store import PERSISTENT_SCOPE
 
 router = APIRouter()
@@ -32,6 +33,7 @@ async def delete_document(source_doc: str) -> DeleteDocumentResponse:
         raise HTTPException(status_code=404, detail=f"No document named {source_doc!r} in the corpus")
     # D-22: BM25 is rebuilt in full after any mutation, never patched.
     get_keyword_index().rebuild()
+    document_files.delete(PERSISTENT_SCOPE, source_doc)
     invalidated = cache.invalidate_by_document(source_doc, PERSISTENT_SCOPE)
     return DeleteDocumentResponse(
         source_doc=source_doc, deleted_chunks=len(removed), invalidated_cache_entries=invalidated

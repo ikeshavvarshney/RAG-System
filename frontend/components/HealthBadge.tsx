@@ -9,9 +9,9 @@ type State =
   | { kind: "down"; message: string };
 
 const DOT = {
-  loading: "bg-amber-400",
-  ok: "bg-emerald-500",
-  down: "bg-red-500",
+  loading: "bg-warn",
+  ok: "bg-good",
+  down: "bg-bad",
 } as const;
 
 export default function HealthBadge() {
@@ -44,17 +44,17 @@ export default function HealthBadge() {
 
   const label =
     state.kind === "loading"
-      ? "checking backend..."
+      ? "Checking backend"
       : state.kind === "ok"
-        ? `backend ${state.data.status} - v${state.data.version}`
-        : "backend offline";
+        ? `Backend online, v${state.data.version}`
+        : "Backend offline";
 
   return (
     <span
-      className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs text-neutral-600"
+      className="inline-flex items-center gap-2 text-xs text-ink-2"
       title={state.kind === "down" ? state.message : undefined}
     >
-      <span className={`size-2 rounded-full ${DOT[state.kind]}`} />
+      <span className={`size-1.5 rounded-full ${DOT[state.kind]} ${state.kind === "loading" ? "animate-pulse" : ""}`} />
       {label}
     </span>
   );

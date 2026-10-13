@@ -50,25 +50,33 @@ function formatMs(ms: number): string {
 }
 
 const MARK = {
-  started: <span className="size-2 animate-pulse rounded-full bg-amber-400" />,
-  completed: <span className="size-2 rounded-full bg-emerald-500" />,
-  failed: <span className="size-2 rounded-full bg-red-500" />,
+  started: <span className="size-1.5 animate-pulse rounded-full bg-accent" />,
+  completed: <span className="size-1.5 rounded-full bg-line-strong" />,
+  failed: <span className="size-1.5 rounded-full bg-bad" />,
 };
 
 export default function StageProgress({ rows }: { rows: StageRow[] }) {
   return (
     <ol className="space-y-1">
       {rows.map((row) => (
-        <li key={row.key} className="flex items-center gap-2 text-xs">
-          {MARK[row.status]}
-          <span className={row.status === "started" ? "text-neutral-900" : "text-neutral-500"}>
+        <li key={row.key} className="flex items-center gap-2.5 text-xs">
+          <span className="flex w-2 justify-center">{MARK[row.status]}</span>
+          <span
+            className={
+              row.status === "started"
+                ? "font-medium text-ink"
+                : row.status === "failed"
+                  ? "text-bad"
+                  : "text-ink-2"
+            }
+          >
             {LABELS[row.stage] ?? row.stage}
             {row.subQuestion !== undefined && (
-              <span className="text-neutral-400"> (part {row.subQuestion + 1})</span>
+              <span className="font-normal text-muted"> (part {row.subQuestion + 1})</span>
             )}
           </span>
           {row.durationMs !== undefined && (
-            <span className="ml-auto tabular-nums text-neutral-400">
+            <span className="tnum ml-auto font-mono text-[11px] text-muted">
               {formatMs(row.durationMs)}
             </span>
           )}

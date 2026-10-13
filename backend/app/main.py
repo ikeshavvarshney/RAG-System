@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_error_handlers
 from app.api.request_log import RequestLogMiddleware
-from app.api.routes import documents, health, ingest, query
+from app.api.routes import documents, evaluation, health, ingest, query, viewer
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.warmup import warm_up_clients
@@ -58,6 +58,8 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router, prefix="/api")
     app.include_router(documents.router, prefix="/api")
     app.include_router(query.router, prefix="/api")
+    app.include_router(evaluation.router, prefix="/api")
+    app.include_router(viewer.router, prefix="/api")
     return app
 
 

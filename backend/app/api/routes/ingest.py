@@ -5,6 +5,7 @@ from app.api.schemas import ERRORS, IngestResponse, SessionResponse
 from app.chains import ingestion_chain
 from app.ingestion.pipeline import FileError
 from app.query import cache
+from app.shared import document_files
 from app.shared.session_store import (
     PERSISTENT_SCOPE,
     InvalidSessionId,
@@ -107,6 +108,11 @@ async def _ingest_upload(files: list[UploadFile], session_id: str | None) -> dic
 
     failures = oversized + result.failed
 
+    scope = PERSISTENT_SCOPE if session_id is None else scope_for(session_id)
+    contents = dict(file_payloads)
+    for name in result.succeeded:
+        document_files.save(scope, name, contents[name])
+
     index = result.index
     return {
         "chunk_count": len(result.chunks),
@@ -172,6 +178,7 @@ async def delete_session_document(session_id: str, source_doc: str):
     if removed:
         # D-22: BM25 is rebuilt in full after any mutation, never patched.
         keyword_index.rebuild()
+    document_files.delete(scope_for(session_id), source_doc)
 
     # Cached answers citing this document would otherwise keep quoting it.
     invalidated = cache.invalidate_by_document(source_doc, scope_for(session_id))
