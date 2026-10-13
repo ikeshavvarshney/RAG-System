@@ -32,12 +32,9 @@ flowchart TD
     VLM -->|success| VIS["extraction_method=vision<br/>chunk_type: table / chart / image_caption"]
     VLM -->|"timeout, quota,<br/>unusable reply"| OCR
 
-    subgraph OCRCASCADE["OCR cascade - each falls through when unavailable, result cached by image"]
-        direction LR
-        OCR["PP-StructureV3<br/>tables to markdown<br/>opt-in"] -.-> OCR2["PaddleOCR<br/>default"] -.-> OCR3["Tesseract"]
-    end
-    OCR3 -->|all engines gone| FAIL["Per-file error<br/>batch continues"]
-    OCRCASCADE --> OCRD["extraction_method=ocr"]
+    OCR["Tesseract OCR<br/>result cached by image"]
+    OCR -->|engine unavailable| FAIL["Per-file error<br/>batch continues"]
+    OCR --> OCRD["extraction_method=ocr"]
 
     DOCX --> SPLIT
     TEXT --> SPLIT["Structure-aware chunking<br/>200-800 tokens, target 500<br/>tables never split"]
@@ -66,19 +63,11 @@ Two limits bound this stage. Each request is capped at 60 seconds with no SDK-in
 
 **Vision page selection and budget.** Which pages reach the model is decided for the whole batch before any model call, from local measurements only. Every PDF page is scored: a detected table of at least 4 by 3 cells, 300 or more vector drawings (a probable chart), or an image covering half the page each count as a strong signal, and a page needs at least one. Standalone images and embedded DOCX images are always candidates and outrank page guesses. The best candidates are kept within `MAX_VISION_PAGES` (80 for the batch), with at most 6 per document so that one long report cannot take the whole budget. A document the corpus manifest marks chart-dense that has no page scoring normally still gets its single best page if that page shows a weaker signal. A page that is not selected is not sent to OCR in its place: it simply keeps its text layer. When a plan exceeds the cap, the corpus ingestion script stops with an error so the thresholds can be tightened, while the upload endpoint keeps the best pages and reports the rest as dropped.
 
-**OCR (D-17, D-27).** OCR produces the passage in two cases: the page is scanned, or vision extraction failed, timed out, or returned nothing usable. Three engines form a cascade, each falling through to the next when it is unavailable, and every fallback is logged with its cause:
+**OCR (D-17, D-27).** OCR produces the passage in two cases: the page is scanned, or vision extraction failed, timed out, or returned nothing usable. One engine does this work: Tesseract, run locally at roughly a second per page. It returns plain text in reading order and does not recover table structure, so a table on a scanned page reaches the index as flattened text rather than as rows and columns. That is accepted: figures and tables on digital pages go to the vision model, and OCR is left with the scanned pages and the occasional vision failure. A page is lost only when the Tesseract binary cannot be run, which is reported as a per-file error naming the configured path.
 
-| Engine | Cost per page | Role |
-| --- | --- | --- |
-| PP-StructureV3 | ~75s (CPU, first machine) | Layout analysis and table structure recognition. Tables are returned as markdown, so a recovered table keeps its rows and columns rather than being flattened to reading order. This is RQ2's structure-aware baseline. |
-| PaddleOCR | ~3s on the first machine; 2.5 to 6 minutes measured on a second, slower one | Plain text recognition in reading order. The default. |
-| Tesseract | ~1s | Last resort, so an unavailable paddle does not cost the page entirely. |
+OCR output is cached on disk, keyed by the image, so a stopped or repeated ingestion run does not recognise the same page twice. In the current corpus OCR accounts for a small share of passages: the scanned PDFs and the handful of pages where the vision reply was unusable.
 
-The engine is selected by `OCR_ENGINE`, and the default is plain PaddleOCR rather than PP-Structure. This is a deliberate departure from always taking the most capable engine: at roughly 75 seconds per page, structure recognition over the full corpus takes hours, and measurement shows the cost is model-bound rather than resolution-bound, so it cannot be tuned away by rendering smaller pages. PP-Structure is therefore enabled for the RQ2 baseline runs that need recovered tables and left off for ordinary ingestion. A page is lost only when every engine is unavailable, which is reported as a per-file error.
-
-OCR output is cached on disk, keyed by the image and the OCR settings, because a page can take minutes on CPU: a stopped or repeated ingestion run does not recognise the same page twice. A result is cached only when the configured engine produced it, so text from a fallback engine is never served later as the configured engine's output. In the current corpus OCR accounts for a small share of passages: the scanned PDFs and the handful of pages where the vision reply was unusable.
-
-**Structure-aware chunking (INGEST-03).** Passages target 500 tokens and are bounded at 200 and 800 (`CHUNK_TARGET_TOKENS`, `CHUNK_MIN_TOKENS`, `CHUNK_MAX_TOKENS`), measured with a tiktoken `cl100k_base` length function. Splits fall on structural boundaries (headings, paragraph breaks, table blocks) in preference to fixed offsets. A run of two or more consecutive markdown table rows is detected as a table and emitted whole as a `chunk_type="table"` passage even when it exceeds the maximum: an oversized intact table is more useful than two fragments of one. This is why the OCR path converts recovered tables to markdown pipe syntax rather than leaving them as HTML, and it is what connects table structure recognition to anything downstream. The nearest preceding markdown heading is carried into each passage's `location` field, which materially improves retrieval on structured documents.
+**Structure-aware chunking (INGEST-03).** Passages target 500 tokens and are bounded at 200 and 800 (`CHUNK_TARGET_TOKENS`, `CHUNK_MIN_TOKENS`, `CHUNK_MAX_TOKENS`), measured with a tiktoken `cl100k_base` length function. Splits fall on structural boundaries (headings, paragraph breaks, table blocks) in preference to fixed offsets. A run of two or more consecutive markdown table rows is detected as a table and emitted whole as a `chunk_type="table"` passage even when it exceeds the maximum: an oversized intact table is more useful than two fragments of one. The nearest preceding markdown heading is carried into each passage's `location` field, which materially improves retrieval on structured documents.
 
 **Dual indexing (INGEST-04).** Passage identifiers are deterministic: a hash of the scope, document, extraction method, chunk type, page, location, position, and text. Re-ingesting an unchanged document therefore rewrites the same passages, and before a re-ingested document is indexed its previous passages are deleted, so an edited file does not leave its old version beside the new one. Passages are embedded in batches, and each batch is written to the vector store as soon as it succeeds, so a failure partway through a long document does not discard the passages already embedded. Embedding requests are paced, because the embedding API issues one request per text rather than a true batch call, which would otherwise breach the free-tier ceiling. The BM25 keyword index is then rebuilt once from the vector store. Deriving it from the store rather than writing both in parallel is what makes the two indexes share one identifier per passage by construction: the keyword index cannot drift from the store it is built from. One passage, two indexes, one identifier.
 
@@ -226,7 +215,7 @@ backend/
     ingestion/
       router.py          Type routing by magic bytes
       vision_select.py   Batch-wide choice of the pages and images sent to vision
-      extractors/        pdf, docx, image, vision, ocr, paddle_ocr
+      extractors/        pdf, docx, image, vision, ocr
       splitter.py        Structure-aware chunking
       chunk_ids.py       Deterministic passage identifiers
       embedder.py        Batched, paced embedding
@@ -251,7 +240,7 @@ The `shared/` package holds everything both pipelines depend on. The division be
 
 **API key rotation.** Free-tier rate limits are the binding operational constraint. A rotation utility round-robins across a pool of keys per provider, and every outbound API call passes through it. It is built in the first week, since retrofitting it after the pipeline exists would require modifying every call site.
 
-**Caching.** Four caches address distinct problems: an embedding cache keyed by content hash, avoiding thousands of redundant calls when the evaluation suite re-runs the same questions across ablation settings; a vision extraction cache, so that re-ingestion during development does not re-pay the heaviest API cost of ingestion; an OCR cache, so that a page costing minutes of CPU is recognised once; and the semantic answer cache, which is a user-facing feature rather than an optimisation. The answer cache is explicitly bypassed during evaluation runs, since a cache hit would return a previous configuration's answer and silently invalidate the comparison.
+**Caching.** Four caches address distinct problems: an embedding cache keyed by content hash, avoiding thousands of redundant calls when the evaluation suite re-runs the same questions across ablation settings; a vision extraction cache, so that re-ingestion during development does not re-pay the heaviest API cost of ingestion; an OCR cache, so that a scanned page is recognised once; and the semantic answer cache, which is a user-facing feature rather than an optimisation. The answer cache is explicitly bypassed during evaluation runs, since a cache hit would return a previous configuration's answer and silently invalidate the comparison.
 
 **Observability.** Pipeline progress and resource consumption are surfaced through a single mechanism. Each stage emits a structured event through an injected emitter, which the streaming endpoint forwards to the client in Server-Sent Events format over a POST request. The pipeline itself remains unaware of the transport, and a no-op emitter is substituted for non-streaming calls such as the evaluation harness. The same event stream carries token usage, recorded inside the provider-client wrapper that also performs credential rotation; output tokens include the model's thinking tokens, which are billed at the output rate, and each web search is reported as a usage event carrying its search depth. Binding both concerns to one wrapper means a call bypassing it bypasses both, which is straightforward to detect in review. Recording usage at individual call sites would instead miss some calls and produce silently incorrect totals. Per-stage timing is captured by the same mechanism at no additional cost, and is reported alongside quality metrics in the evaluation. Separately, the backend logs one line per HTTP request and one summary line per answered query, each tagged with a request identifier that is also returned in the `X-Request-ID` header and printed by the frontend's own request log. The full protocol is in [observability.md](observability.md).
 

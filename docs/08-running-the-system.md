@@ -11,7 +11,7 @@ Every command below is run from the repository root unless stated otherwise. Pat
 | Python | 3.11 or later | Backend. Developed on 3.13. |
 | Node.js | 18.18 or later | Frontend. |
 | Git Bash or a POSIX shell | any | Only for `scripts/fetch_corpus.sh`. |
-| Tesseract | 5.x | Optional. Last-resort OCR engine; vendored at `vendor/tesseract/`. |
+| Tesseract | 5.x | The OCR engine, used for scanned pages and when a vision call fails; vendored at `vendor/tesseract/`. |
 
 A Gemini API key is required for ingestion: vision extraction and embedding both call the API. Without one, ingestion fails at the embedding stage.
 
@@ -40,13 +40,7 @@ Install the package in editable mode, with the development extra for the test su
 pip install -e ".[dev]"
 ```
 
-PaddleOCR is deliberately not part of the base dependencies. It pulls roughly seventy packages and a large CPU wheel, and ingestion degrades to Tesseract without it, so it is a separate extra:
-
-```bash
-pip install -e ".[ocr]"
-```
-
-That extra also carries `paddlex[ocr]`, which PP-StructureV3 needs. Model weights are not bundled: they download to `~/.paddlex/` on the first OCR call, which takes about a minute.
+OCR uses the Tesseract binary, not a Python package with model weights. The vendored copy at `vendor/tesseract/` is the default; set `TESSERACT_CMD` in `backend/.env` to point at a system-wide install instead.
 
 Then create the environment file:
 
@@ -129,7 +123,7 @@ pytest -k vision -q                # by name
 pytest -q -x --lf                  # stop at first failure, rerun last failures
 ```
 
-The suite exercises the real PaddleOCR engine, so the first run after a clean install pays the one-off model download.
+One test runs the real Tesseract binary at `TESSERACT_CMD` and is skipped when that binary is missing.
 
 Frontend checks, from `frontend/`:
 
@@ -225,11 +219,11 @@ The response reports per-file success and failure:
 }
 ```
 
-**Expect a full-corpus ingest to take from half an hour to an hour and a half, depending on the CPU.** The model calls are the smaller part. Across the 50-document corpus the vision plan selects about 74 units (the 12 standalone images, 8 embedded DOCX images, and some 54 PDF pages with tables or charts), each a 15 to 30 second call, and about 560 passages are embedded at the 0.9 second pacing that keeps the embedding API inside its free-tier ceiling. The variable part is OCR, which runs locally on the 30 scanned pages of the two CIA PDFs and on any page whose vision reply was unusable. At about 3 seconds per page that is negligible. On the project's slower 4-core machine it measured 2.5 to 6 minutes per page: ingesting 49 documents there took about 90 minutes, an hour of it OCR on 18 pages.
+**Expect a full-corpus ingest to take roughly 30 to 45 minutes.** The model calls are nearly all of it. Across the 50-document corpus the vision plan selects about 74 units (the 12 standalone images, 8 embedded DOCX images, and some 54 PDF pages with tables or charts), each a 15 to 30 second call, and about 560 passages are embedded at the 0.9 second pacing that keeps the embedding API inside its free-tier ceiling. OCR runs locally with Tesseract on the 30 scanned pages of the two CIA PDFs and on any page whose vision reply was unusable, at about a second per page.
 
 A larger key pool reduces rate-limit stalls but not per-call latency, so it helps only if the run is actually being throttled.
 
-Three properties make a long run safe to interrupt. Vision responses and OCR results are cached by image content, so a re-run does not pay for either twice. Passage identifiers are deterministic and a re-ingested document replaces its earlier passages, so running the same files again does not duplicate them. And each embedding batch is written as soon as it succeeds.
+Three properties make a run safe to interrupt. Vision responses and OCR results are cached by image content, so a re-run does not pay for either twice. Passage identifiers are deterministic and a re-ingested document replaces its earlier passages, so running the same files again does not duplicate them. And each embedding batch is written as soon as it succeeds.
 
 One property makes it worth batching anyway: `ingest_files` extracts every file before it indexes anything. If a 50-file request dies during extraction, nothing from that request is indexed, and the extraction work (though not the API cost) is repeated.
 
@@ -237,21 +231,13 @@ Limits enforced by the endpoint: 60 files per request, 50 MB per file, and `.pdf
 
 ---
 
-## 8.7 Switching the OCR Engine
+## 8.7 OCR
 
-`OCR_ENGINE` in `backend/.env` selects which engine is attempted first. Each falls through to the next when unavailable, so this chooses what is tried, not what is required.
+Tesseract is the only OCR engine. It runs on scanned PDF pages, which go to it directly, and on pages where the vision reply was unusable. A page takes about a second.
 
-| Value | Cost per page | Use |
-|---|---|---|
-| `paddle` | ~3s on a fast CPU, minutes on a slow one | Default. Plain text recognition. |
-| `paddle-structure` | ~75s on CPU | PP-StructureV3: recovers table rows and columns as markdown. The RQ2 baseline. |
-| `tesseract` | ~1s | Skips paddle entirely. |
+`TESSERACT_CMD` in `backend/.env` names the binary. It defaults to the vendored copy at `vendor/tesseract/tesseract.exe`, and a relative path is resolved against the repository root. If the binary cannot be run, every page that needs OCR is reported as a per-file error naming that path.
 
-`paddle-structure` needs the `[ocr]` extra installed. It is not the default because at 75 seconds per page a full corpus pass takes hours; turn it on for the RQ2 baseline runs that need recovered tables. See D-27 for the measurements behind that choice.
-
-**Warm the structure models once, with network access, before an RQ2 run.** PP-StructureV3 uses 13 models (about 1.1 GB, in `~/.paddlex/official_models/`, never in the repository), and PaddleX creates some of them only on the first table prediction, so the first real table would otherwise try to download mid-run. `python scripts/warm_ocr_models.py` (run it with `backend/.venv`) builds the pipeline, runs one prediction on a synthetic table so those models download too, and prints each cached model's path and size. After that the baseline runs offline: set `HF_HUB_OFFLINE=1` and `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True` to stop PaddleX probing its model hosts at startup.
-
-OCR runs on scanned PDF pages, which go to it directly, and on pages where the vision reply was unusable. On a slow CPU a page can take several minutes, so budget for it: the corpus's two scanned PDFs hold 30 pages. Results are cached in `backend/data/cache/ocr/`, so a run that is stopped and started again resumes from the pages already recognised.
+Tesseract returns text in reading order and does not recover table rows and columns, so a table on a scanned page is indexed as flattened text. Results are cached in `backend/data/cache/ocr/`, so a run that is stopped and started again does not recognise the same page twice.
 
 ---
 
@@ -261,7 +247,7 @@ OCR runs on scanned PDF pages, which go to it directly, and on pages where the v
 |---|---|---|
 | `backend/data/chroma/` | Vector store and keyword index | No |
 | `backend/data/cache/vision/` | Cached vision responses, keyed by image | No |
-| `backend/data/cache/ocr/` | Cached OCR text, keyed by image and OCR settings | No |
+| `backend/data/cache/ocr/` | Cached OCR text, keyed by image | No |
 | `backend/data/cache/embeddings/` | Cached embeddings | No |
 | `data/corpus/files/` | Corpus documents | No |
 | `data/corpus/manifest.csv` | Corpus manifest | Yes |
@@ -272,7 +258,7 @@ To start from an empty index, stop the backend and delete the store:
 rm -rf backend/data/chroma
 ```
 
-Leave the caches in place unless you are deliberately re-testing extraction: deleting `backend/data/cache/vision/` means every figure is transcribed again, at full API cost. Deleting `backend/data/cache/ocr/` means every scanned page is recognised again, at minutes per page on CPU.
+Leave the caches in place unless you are deliberately re-testing extraction: deleting `backend/data/cache/vision/` means every figure is transcribed again, at full API cost. Deleting `backend/data/cache/ocr/` is cheap: every scanned page is recognised again at about a second each.
 
 ---
 
@@ -284,6 +270,4 @@ Leave the caches in place unless you are deliberately re-testing extraction: del
 
 **Every figure comes back as `ocr` and none as `vision`.** The vision calls are failing. Check `GEMINI_API_KEYS` is set and that the log does not show repeated rate limits; the fallback is deliberate and silent by design, so the log is the only place it shows.
 
-**Ingestion appears to hang.** It is most likely working. A figure sent to vision takes 15 to 30 seconds and a page sent to OCR can take minutes on a slow CPU, the request returns only when the whole batch is finished, and nothing is logged per page. Finished OCR pages appear one by one as files in `backend/data/cache/ocr/`, which is the easiest way to see progress. Splitting the corpus into smaller batches, and ingesting the scanned PDFs on their own, keeps each run short.
-
-**`paddlex` reports a `DependencyError` for PP-StructureV3.** The `[ocr]` extra is not installed: `pip install -e ".[ocr]"` from `backend/`.
+**Ingestion appears to hang.** It is most likely working. A figure sent to vision takes 15 to 30 seconds, the request returns only when the whole batch is finished, and nothing is logged per page. Splitting the corpus into smaller batches keeps each run short.

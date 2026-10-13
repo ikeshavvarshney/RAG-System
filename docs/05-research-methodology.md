@@ -16,7 +16,7 @@ Hybrid retrieval is widely adopted on the reasoning that dense and sparse method
 
 ### RQ2. Multimodal Extraction
 
-> Does vision-language-model extraction of tables and charts produce measurably better answers than structure-aware OCR extraction, on questions whose answers reside in that visual content?
+> Does vision-language-model extraction of tables and charts produce measurably better answers than OCR extraction, on questions whose answers reside in that visual content?
 
 Vision-based document extraction is more expensive than OCR by a considerable margin. Whether that cost purchases a corresponding improvement in downstream answer quality, as opposed to merely producing richer intermediate output, is an empirical question that this study addresses.
 
@@ -144,13 +144,13 @@ The keyword-heavy question category exists precisely so that outcome 2, if obser
 Two complete indexes are constructed from the same corpus, differing only in extraction method:
 
 - **Vision index.** Tables and charts extracted by the vision-language model, with **OCR fallback disabled**. A page where vision extraction fails contributes no passage to this index.
-- **OCR-only index.** The vision path disabled entirely; all visual content processed by structure-aware OCR.
+- **OCR-only index.** The vision path disabled entirely; all visual content processed by Tesseract OCR.
 
 The query pipeline is held identical across both conditions. Only the index changes.
 
 **On disabling the fallback.** The production system falls back to OCR when vision extraction fails, which is correct behaviour for a deployed service. Retaining that fallback in the experimental index would, however, place OCR-derived passages inside the vision condition, making the comparison one of vision with OCR fallback against OCR alone rather than vision against OCR. The confound worsens as OCR quality improves, since a more capable fallback makes the two conditions more alike and shrinks the measured difference for reasons unrelated to the research question. The fallback is therefore disabled for index construction only, under an explicit flag in the evaluation harness, and the vision failure rate is reported separately.
 
-**On the OCR baseline model.** The OCR condition must use the structure-recognition pipeline, not a vision-language model. Some OCR toolkits now ship vision-language document models alongside conventional ones; running the OCR arm through such a model would make the baseline itself vision-based, reducing the experiment to a comparison between two vision models while appearing to function normally. The model identifier is pinned in configuration, asserted by the harness, and recorded in every results file.
+**On the OCR baseline model.** The OCR condition uses Tesseract, a conventional recognition engine, not a vision-language model. Running the OCR arm through a vision-language document model would make the baseline itself vision-based, reducing the experiment to a comparison between two vision models while appearing to function normally. The engine is named in the summary of every ingestion run.
 
 ### Measurements
 
@@ -167,11 +167,11 @@ Supporting measurements:
 
 ### Methodological Note on the Baseline
 
-The OCR condition uses a structure-aware engine that recovers table rows and columns, rather than a reading-order engine that flattens tables into undifferentiated text.
+The OCR condition uses Tesseract, a reading-order engine: it returns the words on a page in the order they are read and does not recover table rows and columns.
 
-This choice materially affects what the experiment measures. With a structure-blind baseline, a large part of any observed difference would be attributable to structured versus unstructured output, an unsurprising outcome that says little about vision extraction specifically. A structure-aware baseline makes the comparison a genuine test of whether vision-language understanding adds value beyond accurate structural transcription.
+This choice materially affects what the experiment measures. A structure-aware OCR engine (PaddleOCR's PP-Structure) was the planned baseline and was removed on cost grounds: it took roughly 75 seconds per page on the project's CPU-only hardware, and plain PaddleOCR recognition up to 6 minutes per page on the slower machine. With a reading-order baseline, part of any observed difference is attributable to structured versus unstructured output rather than to vision-language understanding specifically.
 
-The consequence is a smaller expected effect size and a stronger claim if an effect is nonetheless observed.
+The consequence is a larger expected effect size and a narrower claim. The result supports the statement that vision extraction outperforms conventional reading-order OCR on table and chart questions. It does not separate how much of that gain a structure-aware OCR engine would also have delivered. This is recorded as a threat to validity in section 5.6.
 
 ---
 
@@ -186,6 +186,8 @@ Each of the following bounds what the reported results support.
 **Model-as-judge measurement noise.** RAGAS metrics are produced by a language model evaluating outputs. This introduces variance absent from exact-match metrics, and may correlate with properties of the answers being judged. Two measures reduce but do not eliminate the concern: the judge is drawn from a different model family than the generator, avoiding self-preference bias; and the baseline is run three times to quantify the residual variance.
 
 **No corpus deletion, and a frozen corpus.** The corpus is fixed after initial indexing, so results describe a static collection. Behaviour under incremental corpus growth, including index drift and embedding staleness, is untested and is left to future work.
+
+**Reading-order OCR baseline.** RQ2's OCR condition uses Tesseract, which does not recover table structure. The measured difference between the two conditions therefore combines two effects: structured against flattened table output, and vision-language understanding against plain transcription. A structure-aware OCR baseline would isolate the second; it was dropped because it was too slow to run on the available hardware.
 
 **Single embedding model.** Retrieval quality throughout is conditioned on one embedding model, chosen under hardware constraints rather than for benchmark performance. A stronger embedding model would plausibly shift the baseline and could alter RQ1's optimum, since improving dense retrieval changes the value that sparse retrieval adds.
 

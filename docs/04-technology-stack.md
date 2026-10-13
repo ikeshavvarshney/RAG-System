@@ -14,9 +14,7 @@ Large-model inference is performed through hosted APIs. Two small models run loc
 | Gemini `gemini-3.5-flash-lite` | API | Vision extraction, groundedness and safety verification, query expansion, decomposition, conversational resolution, guardrails, sufficiency assessment |
 | Gemini `gemini-embedding-001` | API | Dense embeddings for passages and queries |
 | `ms-marco-MiniLM-L-6-v2` | Local, CPU | Cross-encoder reranking |
-| PaddleOCR | Local, CPU | OCR fallback for the vision path (default engine) |
-| PaddleOCR with PP-Structure | Local, CPU | Table structure recognition, opt-in for RQ2 baseline runs |
-| Tesseract | Local, CPU | Last-resort OCR |
+| Tesseract | Local, CPU | OCR for scanned pages and as the fallback for the vision path |
 
 ### Selection rationale
 
@@ -28,9 +26,7 @@ Large-model inference is performed through hosted APIs. Two small models run loc
 
 **Local cross-encoder for reranking.** A 22-million-parameter cross-encoder executes in tens of milliseconds on CPU. A hosted reranking API was considered and rejected: it would have added a network round trip to every query, a third credential pool, and a third rate limit, in exchange for quality that the local model broadly matches at this corpus size. Should reranking prove to be the accuracy bottleneck during evaluation, a larger cross-encoder remains available as a drop-in replacement: more accurate, still CPU-viable, and measurably slower.
 
-**PaddleOCR over Tesseract as the primary OCR engine.** This choice is driven by RQ2 more than by general accuracy. PaddleOCR's PP-Structure component performs table structure recognition, recovering rows and columns rather than emitting words in reading order. With a structure-blind OCR engine as the comparison baseline, a substantial portion of what RQ2 would measure is simply structured output versus unstructured output, an unsurprising result for vision extraction that says little about the question of interest. A structure-aware OCR baseline makes the comparison genuinely informative. Tesseract is retained as a fallback so that an unavailable primary engine does not block ingestion.
-
-The three engines are wired as a cascade selected by `OCR_ENGINE`, each falling through to the next when unavailable. PP-Structure is not the default: it measures roughly 75 seconds per page on CPU against roughly 3 for plain recognition (on the first development machine; plain recognition measured 2.5 to 6 minutes per page on the second, which is why OCR results are cached), so it is enabled for the RQ2 baseline runs that need recovered tables and left off for ordinary ingestion. See D-27 for the measurements behind that split.
+**Tesseract as the only OCR engine.** PaddleOCR was the original choice, with its PP-Structure component as a structure-aware baseline for RQ2, and it was removed after measurement. On the project's CPU-only hardware plain PaddleOCR recognition took between 3 seconds and 6 minutes per page depending on the machine, and PP-Structure roughly 75 seconds per page, so scanning the corpus's 30 scanned pages could take over an hour. Tesseract reads a page in about a second, installs as one binary rather than seventy Python packages, and downloads no model weights. The cost is that Tesseract returns words in reading order and does not recover table rows and columns. For ordinary ingestion that matters little, because tables and charts on digital pages go to the vision model and OCR handles only scanned pages and vision failures. For RQ2 it changes what the OCR baseline is, which is recorded in the research methodology. See D-27.
 
 **Embedding model choice and its limitation.** Larger open-weight embedding models currently achieve better retrieval benchmark results than the hosted model used here. They were not adopted because self-hosting one requires GPU memory well beyond what is available. This is recorded as a limitation in the research methodology rather than presented as a neutral choice: retrieval results reported by this project are conditioned on one embedding model, and a stronger model would plausibly shift the baseline.
 
@@ -82,13 +78,12 @@ One consequence of this design is also recorded in the architecture document, an
 |---|---|
 | PyMuPDF | PDF text extraction and page rasterisation |
 | python-docx | DOCX body text and embedded image extraction |
-| PaddleOCR + PaddlePaddle | Default OCR engine; PP-Structure adds table structure recognition (`paddlex[ocr]` extra) |
-| pytesseract | Last-resort OCR |
+| pytesseract | Python binding for the Tesseract OCR engine |
 | Pillow | Image handling for OCR and vision extraction |
 
 **PyMuPDF** handles both text extraction and page-to-image rendering. The rendering capability is required for the scanned-document path: a PDF page carrying no text layer must be rasterised before OCR can process it. Alternative PDF libraries offer extraction but not rendering, which would have meant maintaining two libraries for one file type.
 
-**Installation note.** PaddlePaddle and the PyTorch dependency underlying sentence-transformers both default to GPU builds that are substantially larger than required. CPU-only builds must be specified explicitly. Both local models also download weights on first use, so they are initialised during environment setup rather than on first request.
+**Installation note.** The PyTorch dependency underlying sentence-transformers defaults to a GPU build that is substantially larger than required, so the CPU-only build must be specified explicitly. The cross-encoder downloads its weights on first use, so it is initialised during environment setup rather than on first request. Tesseract is a standalone binary, vendored at `vendor/tesseract/`, and needs no model download.
 
 ---
 
@@ -151,6 +146,7 @@ RAGAS itself invokes a language model to produce its judgments, so an evaluation
 | Large open-weight embedding models | Better retrieval quality, but memory requirements exceed available hardware. Recorded as a limitation and revisited in future work |
 | Hosted vector databases | Unwarranted infrastructure at this corpus size; local storage also simplifies the parallel indexes RQ2 requires |
 | Elasticsearch or equivalent | Same reasoning applied to sparse retrieval |
+| PaddleOCR and PP-Structure | Adopted first, then removed: seconds to minutes per page on CPU against about one second for Tesseract (D-27) |
 | Dedicated guardrails frameworks | Rigorous, but guardrails are two requirements here rather than a research focus. Cited in related work as the established alternative |
 | Authentication and multi-user support | Future scope; the current deliverable is a single-user academic demonstration |
 | Containerisation and orchestration | Future scope, alongside public deployment; the system currently runs locally |

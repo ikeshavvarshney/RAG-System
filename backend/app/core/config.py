@@ -112,25 +112,7 @@ class Settings(BaseSettings):
     WEB_RELEVANCE_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     WEB_RELEVANCE_MIN_SCORE: float = Field(default=0.30, ge=0.0, le=1.0)
 
-#---OCR engine ---
-    # "paddle"            plain PP-OCR recognition, ~3s/page (default)
-    # "paddle-structure"  PP-StructureV3: layout + table structure recovery
-    #                     as markdown, ~75s/page on CPU. This is D-27's
-    #                     structure-aware OCR baseline for RQ2, not a
-    #                     production ingestion setting: at that cost a full
-    #                     corpus pass takes hours. Turn it on for the runs
-    #                     that need recovered tables.
-    # "tesseract"         skip paddle entirely
-    # Each engine falls back to the next cheaper one at runtime when it is
-    # unavailable, so this chooses what is attempted, not what is required.
-    OCR_ENGINE: Literal["paddle-structure", "paddle", "tesseract"] = "paddle"
-    OCR_LANG: str = "en"
-    # Detections below this score are dropped. Paddle boxes page rules and
-    # borders as text, which would otherwise reach the chunker as content.
-    OCR_MIN_CONFIDENCE: float = 0.5
-    # Rotated-line classification. Off by default: it costs a model per image
-    # and the corpus is upright pages.
-    OCR_TEXTLINE_ORIENTATION: bool = False
+#---OCR (Tesseract) ---
     # Absolute path to the Tesseract binary. Overridable per machine via .env
     # so the wrapper does not depend on the developer's system PATH.
     TESSERACT_CMD: str = str(_REPO_ROOT / "vendor" / "tesseract" / "tesseract.exe")

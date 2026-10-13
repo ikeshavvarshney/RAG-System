@@ -273,7 +273,7 @@ def main() -> int:
     monitor.install()
     before = store_report()
     started = time.perf_counter()
-    summary: dict = {"ocr_engine": settings.OCR_ENGINE, "vision_cap": settings.MAX_VISION_PAGES, "files": len(files),
+    summary: dict = {"ocr_engine": "tesseract", "vision_cap": settings.MAX_VISION_PAGES, "files": len(files),
                      "store_before": {k: before[k] for k in ("chroma_count", "bm25_count")}}
     code = 0
     result = None
@@ -330,7 +330,7 @@ def main() -> int:
                    "failure_reason": index.failure_reason, "by_extraction_method": index.by_extraction_method},
         )
         print(f"\nIngested {len(result.succeeded)} files, {len(result.failed)} failed, {len(result.chunks)} chunks "
-              f"(vision cap {settings.MAX_VISION_PAGES}, OCR engine {settings.OCR_ENGINE}).")
+              f"(vision cap {settings.MAX_VISION_PAGES}).")
         for failure in result.failed:
             print(f"  FAILED {failure.filename}: {failure.reason}")
     summary["store_after"] = store_report()
