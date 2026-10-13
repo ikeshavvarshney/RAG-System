@@ -99,6 +99,10 @@ Serves on http://localhost:3000, with the overview page at `/`, the chat at `/ch
 
 Questions asked in the chat go to `POST /api/query/stream`. While the pipeline runs the chat lists each stage as it starts and finishes; the answer then shows numbered citations (a document and page, or a web URL), a fact-check score, and an expandable breakdown of tokens and estimated cost per stage. The cost uses the Gemini list prices in `frontend/lib/pricing.ts`; update them there if the models or prices change.
 
+**Document viewer.** A document opens beside the conversation from three places: a document citation under an answer, a file in the session upload list, or the corpus list in the documents rail. A PDF is shown page by page, and when it was opened from a citation, the cited passage is highlighted on pages that have a text layer. An image is shown as itself. A DOCX has no fixed pages, so it shows its extracted text. The "Extracted text" tab shows what was indexed from the current page, labelled by how it was obtained (text layer, vision model, or OCR), which is the quickest way to check a table or chart transcription against the page it came from.
+
+The viewer needs the original file. Uploads keep theirs: corpus uploads in `backend/data/documents/`, session uploads inside the session's own directory, removed with the document or the session. For the corpus ingested by the script, originals are read from `data/corpus/files/`. When no original is found, the viewer still shows the indexed text.
+
 **Logs.** The backend logs one line per request (`METHOD path status duration id=<request id>`) and one summary line per answered query, at the level set by `LOG_LEVEL` in `backend/.env` (default `INFO`; health checks log at `DEBUG`). The frontend logs the same request line to the browser console with an `[api]` prefix, at `NEXT_PUBLIC_LOG_LEVEL` in `frontend/.env.local`. Both sides print the same request id (the `X-Request-ID` response header), so a browser line can be matched to its backend line.
 
 **Both services must be running to upload documents or ask questions through the browser.** The backend's CORS policy allows exactly one origin, `FRONTEND_ORIGIN`, which defaults to `http://localhost:3000`. Starting the frontend on a different port (`next dev` will do this automatically if 3000 is taken) causes uploads to fail with a CORS error rather than an obvious one. Either free port 3000 or set `FRONTEND_ORIGIN` in `backend/.env` to match.
@@ -246,6 +250,7 @@ Tesseract returns text in reading order and does not recover table rows and colu
 | Path | Contents | Tracked |
 |---|---|---|
 | `backend/data/chroma/` | Vector store and keyword index | No |
+| `backend/data/documents/` | Originals of documents uploaded to the corpus, for the document viewer | No |
 | `backend/data/cache/vision/` | Cached vision responses, keyed by image | No |
 | `backend/data/cache/ocr/` | Cached OCR text, keyed by image | No |
 | `backend/data/cache/embeddings/` | Cached embeddings | No |

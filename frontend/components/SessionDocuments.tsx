@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useOpenViewer } from "@/components/DocumentViewer";
 import {
   deleteSessionDocument,
   listSessionDocuments,
@@ -18,6 +19,7 @@ export default function SessionDocuments({ refreshToken, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
+  const openViewer = useOpenViewer();
 
   // Fetched on mount and after each mutation, never polled: this client is the
   // only writer to its own session, so there is nothing to discover on a timer.
@@ -82,9 +84,14 @@ export default function SessionDocuments({ refreshToken, onChanged }: Props) {
         {documents.map((document) => (
           <li key={document.source_doc} className="flex items-center gap-2 py-1.5 text-sm">
             <div className="min-w-0">
-              <p className="truncate text-ink" title={document.source_doc}>
+              <button
+                type="button"
+                onClick={() => openViewer({ sourceDoc: document.source_doc })}
+                title={`Open ${document.source_doc}`}
+                className="block max-w-full truncate text-left text-ink underline decoration-line-strong hover:decoration-ink"
+              >
                 {document.source_doc}
-              </p>
+              </button>
               <p className="tnum text-xs text-muted">
                 {document.chunk_count} passage
                 {document.chunk_count === 1 ? "" : "s"}

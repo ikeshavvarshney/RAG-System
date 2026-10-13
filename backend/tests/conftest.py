@@ -64,6 +64,12 @@ def isolate_ocr_cache(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_document_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "DOCUMENTS_PATH", str(tmp_path / "documents"))
+    monkeypatch.setattr(settings, "CORPUS_FILES_DIR", str(tmp_path / "corpus-files"))
+
+
+@pytest.fixture(autouse=True)
 def isolate_index_stores(tmp_path, monkeypatch):
     """Keep every test off the real Gemini API and the real ./data/chroma."""
     from app.ingestion import indexer

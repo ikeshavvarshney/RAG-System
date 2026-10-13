@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import AnswerCard, { type AnswerState } from "@/components/AnswerCard";
+import CorpusDocuments from "@/components/CorpusDocuments";
+import DocumentViewer, { ViewerContext } from "@/components/DocumentViewer";
 import FileUpload from "@/components/FileUpload";
 import { ArrowUp, Close, Doc, Stop } from "@/components/Icons";
 import { applyStageEvent } from "@/components/StageProgress";
 import { streamQuery, type IngestResponse } from "@/lib/api";
+import type { ViewerTarget } from "@/lib/viewer";
 
 type Message =
   | { id: string; role: "user" | "note"; content: string }
@@ -23,6 +26,14 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [showDocs, setShowDocs] = useState(false);
+  const [viewing, setViewing] = useState<ViewerTarget | null>(null);
+  const [corpusVersion, setCorpusVersion] = useState(0);
+
+  const openViewer = useCallback((target: ViewerTarget) => {
+    setShowDocs(false);
+    setViewing(target);
+  }, []);
+  const closeViewer = useCallback(() => setViewing(null), []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -41,6 +52,7 @@ export default function Chat() {
   }, [input]);
 
   function handleIngested(result: IngestResponse) {
+    setCorpusVersion((version) => version + 1);
     const where = result.corpus_scope === "persistent" ? "the corpus" : "this session";
     const lines = [
       `Indexed ${result.indexed.total} passages from ${result.succeeded.length} document(s) into ${where}: ${result.succeeded.join(", ")}.`,
@@ -122,13 +134,15 @@ export default function Chat() {
   }
 
   const empty = messages.length === 0;
+  const railOnDesktop = viewing ? "lg:hidden" : "lg:static lg:flex lg:w-80 lg:border-r lg:px-5";
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1">
+    <ViewerContext.Provider value={openViewer}>
+    <div className={`mx-auto flex min-h-0 w-full flex-1 ${viewing ? "max-w-none" : "max-w-6xl"}`}>
       <aside
         className={`${
           showDocs ? "fixed inset-0 top-14 z-20 flex" : "hidden"
-        } w-full shrink-0 flex-col overflow-y-auto border-line bg-page px-4 py-5 sm:px-6 lg:static lg:flex lg:w-80 lg:border-r lg:px-5`}
+        } w-full shrink-0 flex-col overflow-y-auto border-line bg-page px-4 py-5 sm:px-6 ${railOnDesktop}`}
         aria-label="Documents"
       >
         <div className="mb-4 flex items-center justify-between">
@@ -143,13 +157,21 @@ export default function Chat() {
           </button>
         </div>
         <FileUpload onIngested={handleIngested} />
+        <CorpusDocuments refreshToken={corpusVersion} />
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col" aria-label="Conversation">
-        <div className="flex shrink-0 items-center justify-end border-b border-line px-4 py-2 lg:hidden">
+        <div
+          className={`flex shrink-0 items-center justify-end border-b border-line px-4 py-2 ${
+            viewing ? "" : "lg:hidden"
+          }`}
+        >
           <button
             type="button"
-            onClick={() => setShowDocs(true)}
+            onClick={() => {
+              setViewing(null);
+              setShowDocs(true);
+            }}
             className="inline-flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink"
           >
             <Doc />
@@ -260,6 +282,15 @@ export default function Chat() {
           </p>
         </form>
       </section>
+
+      {viewing && (
+        <DocumentViewer
+          key={`${viewing.sourceDoc}:${viewing.chunkId ?? ""}:${viewing.page ?? ""}`}
+          target={viewing}
+          onClose={closeViewer}
+        />
+      )}
     </div>
+    </ViewerContext.Provider>
   );
 }

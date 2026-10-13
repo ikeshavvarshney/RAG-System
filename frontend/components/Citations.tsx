@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useOpenViewer } from "@/components/DocumentViewer";
 import { Doc, Globe } from "@/components/Icons";
 import type { Citation, QueryResponse } from "@/lib/api";
 
@@ -11,7 +14,7 @@ function inline(text: string, anchor: string, keyPrefix: string): ReactNode[] {
         <a
           key={key}
           href={`#${anchor}-${marker[1]}`}
-          className="tnum mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-accent-soft px-1 align-[1px] text-[11px] font-medium text-accent-strong no-underline hover:bg-accent-line"
+          className="tnum mx-0.5 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded bg-accent-soft px-1 align-[1px] text-[11px] font-medium text-accent-strong no-underline hover:bg-accent-line"
         >
           {marker[1]}
         </a>
@@ -65,6 +68,7 @@ function hostname(url: string): string {
 }
 
 function CitationItem({ citation }: { citation: Citation }) {
+  const openViewer = useOpenViewer();
   if (citation.kind === "web") {
     return (
       <>
@@ -89,9 +93,16 @@ function CitationItem({ citation }: { citation: Citation }) {
     <>
       <Doc className="mt-0.5 shrink-0 text-series-corpus" />
       <div className="min-w-0">
-        <p className="truncate font-medium text-ink" title={citation.source_doc}>
+        <button
+          type="button"
+          onClick={() =>
+            openViewer({ sourceDoc: citation.source_doc, page: citation.page, chunkId: citation.chunk_id })
+          }
+          title={`Open ${citation.source_doc}`}
+          className="block max-w-full truncate text-left font-medium text-ink underline decoration-line-strong hover:decoration-ink"
+        >
           {citation.source_doc}
-        </p>
+        </button>
         <p className="text-muted">
           Document{citation.page !== null && `, page ${citation.page}`}
         </p>

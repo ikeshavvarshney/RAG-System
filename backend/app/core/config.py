@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # .../RAG-System/backend/app/core/config.py -> .../RAG-System
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_ROOT = _REPO_ROOT / "backend"
-_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "OCR_CACHE_DIR", "CACHE_PATH")
+_STORAGE_PATHS = ("CHROMA_PATH", "SESSION_STORE_ROOT", "DOCUMENTS_PATH","EMBEDDING_CACHE_DIR", "VISION_CACHE_DIR", "OCR_CACHE_DIR", "CACHE_PATH")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # One Chroma directory per session, so a session's uploads are dropped by removing a directory
     # and cannot contaminate the corpus that RQ1/RQ2 are measured against.
     SESSION_STORE_ROOT: str = "./data/sessions"
+    # Originals of uploaded corpus documents, for the document viewer. Session originals sit in the session directory.
+    DOCUMENTS_PATH: str = "./data/documents"
+    # Where scripts/fetch_corpus.sh puts the corpus; the viewer reads originals from here when none was uploaded.
+    CORPUS_FILES_DIR: str = str(_REPO_ROOT / "data" / "corpus" / "files")
     SESSION_TTL_HOURS: float = 24.0
     SESSION_MAX_DOCUMENTS: int = 5
 

@@ -9,7 +9,7 @@ Requirements covered: FRONTEND-01 to FRONTEND-05. See [02. Requirements Specific
 | Route | Contents |
 |---|---|
 | `/` | Overview of the system and its pipeline |
-| `/chat` | Document upload and cited question answering |
+| `/chat` | Document upload, cited question answering, and a document viewer for pages and extracted text |
 | `/evaluation` | RAGAS results per run, run comparison, and a form that starts a run |
 
 ## Stack
