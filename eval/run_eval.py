@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import csv
 import json
 import logging
@@ -55,6 +56,7 @@ _THINK = re.compile(r"<think>.*?</think>", re.S)
 UNSCORED_CATEGORIES = {"out_of_corpus"}
 MAX_WAIT_SEC = 65.0
 MAX_ATTEMPTS = 12
+COVERAGE_WARNING = 80.0
 METRIC_NAMES = ("faithfulness", "answer_relevancy", "context_precision", "context_recall")
 
 
@@ -134,15 +136,162 @@ def collect_contexts(result) -> list[dict]:
                 "source_doc": meta.get("source_doc"),
                 "page": meta.get("page"),
                 "source_url": meta.get("source_url"),
+                "score": cand.score,
+                "retrievers": sorted({p.retriever for p in cand.provenance}),
             }
         )
     return contexts
+
+
+ALLOWED_KEYS = (
+    "FUSION_DENSE_WEIGHT",
+    "RRF_K",
+    "RETRIEVAL_TOP_K",
+    "EXPANSION_COUNT",
+    "EXPANSION_ENABLED",
+    "DECOMPOSITION_ENABLED",
+    "RERANK_ENABLED",
+    "RERANK_CANDIDATES",
+    "RERANK_TOP_K",
+    "CHROMA_PATH",
+)
+PRESETS = {
+    "naive": {
+        "FUSION_DENSE_WEIGHT": 1.0,
+        "EXPANSION_ENABLED": False,
+        "RERANK_ENABLED": False,
+        "DECOMPOSITION_ENABLED": False,
+        "CHROMA_PATH": "./data/chroma_naive",
+    }
+}
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def cast_override(key: str, raw):
+    from typing import Annotated
+
+    from pydantic import TypeAdapter, ValidationError
+
+    from app.core.config import Settings
+
+    if key not in ALLOWED_KEYS:
+        raise ConfigError(f"unknown config key {key!r}; allowed: {', '.join(ALLOWED_KEYS)}")
+    field = Settings.model_fields[key]
+    try:
+        annotation = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
+        value = TypeAdapter(annotation).validate_python(raw)
+    except ValidationError as exc:
+        raise ConfigError(f"{key}={raw!r}: {exc.errors()[0]['msg']}") from None
+    if key == "CHROMA_PATH":
+        value = str((BACKEND / value).resolve())
+        if not Path(value).is_dir():
+            raise ConfigError(f"CHROMA_PATH {value} does not exist; build that collection first instead of opening an empty one")
+    return value
+
+
+def resolve_overrides(preset: str | None, config_file: Path | None, sets: list[str]) -> dict:
+    merged: dict = {}
+    if preset:
+        if preset not in PRESETS:
+            raise ConfigError(f"unknown preset {preset!r}; available: {', '.join(PRESETS)}")
+        merged.update(PRESETS[preset])
+    if config_file:
+        merged.update(json.loads(config_file.read_text(encoding="utf-8")))
+    for item in sets:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise ConfigError(f"--set expects KEY=VALUE, got {item!r}")
+        merged[key.strip()] = value.strip()
+    return {key: cast_override(key, value) for key, value in merged.items()}
+
+
+def effective_config(preset: str | None, overrides: dict) -> dict:
+    from app.core.config import settings
+
+    return {
+        "preset": preset,
+        "overrides": overrides,
+        "effective": {key: getattr(settings, key) for key in ALLOWED_KEYS},
+    }
+
+
+def _reset_stores() -> None:
+    import app.ingestion.indexer as indexer
+
+    if indexer._vector_store is not None:
+        indexer._vector_store.close()
+    indexer._vector_store = None
+    indexer._keyword_index = None
+
+
+@contextlib.contextmanager
+def applied(overrides: dict):
+    from app.core.config import settings
+
+    previous = {key: getattr(settings, key) for key in overrides}
+    try:
+        for key, value in overrides.items():
+            setattr(settings, key, value)
+        if "CHROMA_PATH" in overrides:
+            _reset_stores()
+        yield
+    finally:
+        for key, value in previous.items():
+            setattr(settings, key, value)
+        if "CHROMA_PATH" in overrides:
+            _reset_stores()
+
+
+def config_diff(stored: dict | None, current: dict | None) -> list[str]:
+    old = (stored or {}).get("effective", {})
+    new = (current or {}).get("effective", {})
+    return [
+        f"{key}: stored={old.get(key)!r} current={new.get(key)!r}"
+        for key in sorted(set(old) | set(new))
+        if old.get(key) != new.get(key)
+    ]
+
+
+def answer_source(contexts: list[dict]) -> str:
+    kinds = {c["source"] for c in contexts}
+    if not kinds:
+        return "none"
+    if kinds == {"corpus"}:
+        return "corpus"
+    if kinds == {"web"}:
+        return "web"
+    return "mixed"
+
+
+def oos_outcome(record: dict) -> str:
+    if record["answer_source"] in ("web", "mixed"):
+        return "web_fallback"
+    if record.get("non_answer") or not record.get("answer"):
+        return "declined"
+    return "answered_from_corpus"
+
+
+class _PipelineLog(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.INFO)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if message.startswith("retrieval config:"):
+            self.lines.append(message)
 
 
 async def run_question(q: dict) -> dict:
     from app.query.pipeline import run_query
 
     session_id = f"eval-{uuid.uuid4().hex}"
+    capture = _PipelineLog()
+    pipeline_logger = logging.getLogger("app.query.pipeline")
+    pipeline_logger.addHandler(capture)
     began = time.perf_counter()
     record = {**q, "session_id": session_id}
     try:
@@ -150,13 +299,24 @@ async def run_question(q: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - one failed question must not lose the rest of the run
         record.update(error=f"{type(exc).__name__}: {exc}", terminated_at=None, answer=None, contexts=[], citations=[])
     else:
+        subs = result.sub_queries
         record.update(
             error=None,
             terminated_at=result.terminated_at,
             answer=result.answer or result.response,
             contexts=collect_contexts(result),
             citations=[c.model_dump() for c in result.citations],
+            non_answer=result.generation.is_non_answer if result.generation else None,
+            pipeline={
+                "reranked": bool(result.reranked or any(s.reranked for s in subs)),
+                "expanded_queries": result.expanded_queries or [e for s in subs for e in s.expanded_queries],
+                "sub_questions": len(subs),
+            },
         )
+    finally:
+        pipeline_logger.removeHandler(capture)
+    record["retrieval_log"] = capture.lines
+    record["answer_source"] = answer_source(record["contexts"])
     record["wall_clock_sec"] = round(time.perf_counter() - began, 2)
     return record
 
@@ -182,15 +342,18 @@ def append_jsonl(path: Path, row: dict) -> None:
         os.fsync(handle.fileno())
 
 
-async def run_pipeline(questions: list[dict], raw_path: Path, run_name: str, finished: dict[str, dict]) -> list[dict]:
+async def run_pipeline(
+    questions: list[dict], raw_path: Path, run_name: str, finished: dict[str, dict], config: dict
+) -> list[dict]:
     records = dict(finished)
     for q in questions:
         if q["id"] in records:
             continue
         record = await run_question(q)
         records[q["id"]] = record
-        write_json(raw_path, {"run_name": run_name, "questions": [records[x["id"]] for x in questions if x["id"] in records]})
-        print(f"[{q['id']}] {record['terminated_at']} {record['wall_clock_sec']}s", flush=True)
+        ordered = [records[x["id"]] for x in questions if x["id"] in records]
+        write_json(raw_path, {"run_name": run_name, "config": config, "questions": ordered})
+        print(f"[{q['id']}] {record['terminated_at']} {record['answer_source']} {record['wall_clock_sec']}s", flush=True)
         if record["terminated_at"] == "cache_hit":
             break
     return [records[q["id"]] for q in questions if q["id"] in records]
@@ -450,25 +613,90 @@ def _number(value) -> float | None:
     return None if number != number else round(number, 4)
 
 
-def build_scored(run_name: str, raw_source: str | None, judge_model: str, rows: list[dict], skipped: list[dict]) -> dict:
-    aggregate: dict = {"scored_ok": sum(r["status"] == "ok" for r in rows), "failed": sum(r["status"] == "failed" for r in rows)}
+
+SOURCES = ("corpus", "web", "mixed", "none")
+
+
+def _aggregate(rows: list[dict]) -> dict:
+    out: dict = {"questions": len(rows)}
     for name in METRIC_NAMES:
         values = [r["scores"][name] for r in rows if r["scores"].get(name) is not None]
-        aggregate[name] = round(sum(values) / len(values), 4) if values else None
-        aggregate[f"{name}_n"] = len(values)
-    aggregate["judge_prompt_tokens"] = sum(r["prompt_tokens"] for r in rows)
-    aggregate["judge_completion_tokens"] = sum(r["completion_tokens"] for r in rows)
-    aggregate["http_429"] = sum(r["http_429"] for r in rows)
-    aggregate["scoring_seconds"] = round(sum(r["seconds"] for r in rows), 1)
+        out[name] = round(sum(values) / len(values), 4) if values else None
+        out[f"{name}_n"] = len(values)
+    return out
+
+
+def split_summary(records: list[dict]) -> dict:
+    graded = [r for r in records if r["category"] not in UNSCORED_CATEGORIES]
+    counts = {s: sum(r["answer_source"] == s for r in graded) for s in SOURCES}
+    total = len(graded)
+    percent = {s: round(100.0 * counts[s] / total, 1) if total else 0.0 for s in SOURCES}
+    return {
+        "questions": total,
+        "counts": counts,
+        "percent": percent,
+        "corpus_coverage_percent": percent["corpus"],
+        "low_corpus_coverage": bool(total) and percent["corpus"] < COVERAGE_WARNING,
+    }
+
+
+def build_scored(
+    run_name: str,
+    raw_source: str | None,
+    judge_model: str,
+    config: dict | None,
+    records: list[dict],
+    rows: list[dict],
+    skipped: list[dict],
+) -> dict:
+    source_of = {r["id"]: r["answer_source"] for r in records}
+    rows = [{**r, "answer_source": source_of[r["id"]]} for r in rows]
+    ok = [r for r in rows if r["status"] == "ok"]
+    by_source = {s: [r for r in ok if r["answer_source"] == s] for s in SOURCES}
     return {
         "run_name": run_name,
         "raw_source": raw_source,
         "judge_model": judge_model,
-        "aggregate": aggregate,
+        "config": config,
+        "split": split_summary(records),
+        "aggregate": {
+            "overall": _aggregate(ok),
+            "corpus_only": _aggregate(by_source["corpus"]),
+            "web": _aggregate(by_source["web"]),
+            "mixed": _aggregate(by_source["mixed"]),
+        },
+        "failed_questions": sum(r["status"] == "failed" for r in rows),
+        "judge_usage": {
+            "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
+            "completion_tokens": sum(r["completion_tokens"] for r in rows),
+            "http_429": sum(r["http_429"] for r in rows),
+            "scoring_seconds": round(sum(r["seconds"] for r in rows), 1),
+        },
+        "out_of_corpus": [
+            {"id": r["id"], "answer_source": r["answer_source"], "outcome": oos_outcome(r)}
+            for r in records
+            if r["category"] in UNSCORED_CATEGORIES
+        ],
         "per_question": rows,
         "failed": [{"id": r["id"], "failures": r["failures"]} for r in rows if r["status"] == "failed"],
         "skipped": skipped,
     }
+
+
+def print_split(split: dict) -> None:
+    counts, percent = split["counts"], split["percent"]
+    summary = ", ".join(f"{s}={counts[s]} ({percent[s]}%)" for s in SOURCES)
+    print(f"ANSWER SOURCE SPLIT ({split['questions']} graded questions): {summary}")
+    if split["low_corpus_coverage"]:
+        print(f"WARNING: corpus-only coverage {percent['corpus']}% is below {COVERAGE_WARNING:.0f}%; ablation deltas rest on a small subset")
+
+
+def skip_reason(record: dict) -> str:
+    if record["category"] in UNSCORED_CATEGORIES:
+        return "out_of_corpus"
+    return record.get("error") or (record["terminated_at"] if record["terminated_at"] != "retrieved" else None) or (
+        "no answer" if not record["answer"] else "no contexts" if not record["contexts"] else "no reference answer"
+    )
 
 
 def main() -> int:
@@ -479,6 +707,10 @@ def main() -> int:
     parser.add_argument("--ids", help="comma-separated question ids")
     parser.add_argument("--from-raw", help="score eval/results/<name>.raw.json without running the pipeline")
     parser.add_argument("--resume", action="store_true", help="continue a run that already has partial results")
+    parser.add_argument("--no-score", action="store_true", help="run the pipeline and write raw results only")
+    parser.add_argument("--preset", help=f"named config preset: {', '.join(PRESETS)}")
+    parser.add_argument("--config", type=Path, help="JSON file of config overrides")
+    parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="config override, repeatable")
     parser.add_argument("--audit", action="store_true", help="report on the reference set and exit")
     args = parser.parse_args()
 
@@ -486,12 +718,29 @@ def main() -> int:
         print(json.dumps(audit_reference_set(args.reference), indent=2))
         return 0
 
+    if args.from_raw and (args.preset or args.config or args.set):
+        print("config overrides cannot be combined with --from-raw; the raw file carries its own config", file=sys.stderr)
+        return 2
+    try:
+        overrides = resolve_overrides(args.preset, args.config, args.set)
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 2
+
+    with applied(overrides):
+        return run(args, overrides)
+
+
+def run(args, overrides: dict) -> int:
+    from app.core.logging import configure_logging
+
+    configure_logging()
     raw_path = RESULTS_DIR / f"{args.run_name}.raw.json"
     scores_path = RESULTS_DIR / f"{args.run_name}.scores.jsonl"
     scored_path = RESULTS_DIR / f"{args.run_name}.scored.json"
     STATS.log_path = RESULTS_DIR / f"{args.run_name}.judge.jsonl"
 
-    partial = [p.name for p in (scores_path, raw_path if not args.from_raw else scores_path) if p.exists()]
+    partial = [p.name for p in (scores_path, raw_path) if p.exists()]
     if partial and not args.resume:
         print(f"{partial[0]} already exists; pass --resume to continue this run or choose a new --run-name", file=sys.stderr)
         return 4
@@ -499,9 +748,27 @@ def main() -> int:
     wanted = set(args.ids.split(",")) if args.ids else None
     if args.from_raw:
         raw = json.loads((RESULTS_DIR / f"{args.from_raw}.raw.json").read_text(encoding="utf-8"))
+        config = raw.get("config")
         records = [r for r in raw["questions"] if wanted is None or r["id"] in wanted]
         records = records[: args.limit] if args.limit else records
+        for r in records:
+            r.setdefault("answer_source", answer_source(r["contexts"]))
     else:
+        config = effective_config(args.preset, overrides)
+    print("effective config:", json.dumps(config["effective"] if config else None), flush=True)
+
+    if args.resume and (raw_path.exists() or scores_path.exists()):
+        if raw_path.exists():
+            stored = json.loads(raw_path.read_text(encoding="utf-8")).get("config")
+        else:
+            first = read_jsonl(scores_path)[:1]
+            stored = first[0].get("_config") if first else None
+        diff = config_diff(stored, config)
+        if diff:
+            print("REFUSING to resume: stored config differs from the current one:\n  " + "\n  ".join(diff), file=sys.stderr)
+            return 5
+
+    if not args.from_raw:
         questions = [q for q in load_questions(args.reference) if wanted is None or q["id"] in wanted]
         questions = questions[: args.limit] if args.limit else questions
         if not questions:
@@ -511,41 +778,47 @@ def main() -> int:
         if raw_path.exists():
             finished = {r["id"]: r for r in json.loads(raw_path.read_text(encoding="utf-8"))["questions"] if not r.get("error")}
             print(f"resuming pipeline: {len(finished)} of {len(questions)} already run")
-        records = asyncio.run(run_pipeline(questions, raw_path, args.run_name, finished))
+        records = asyncio.run(run_pipeline(questions, raw_path, args.run_name, finished, config))
         print(f"raw results: {raw_path}")
         hits = [r["id"] for r in records if r["terminated_at"] == "cache_hit"]
         if hits:
             print(f"ABORT: answer cache hit on {hits}; not scoring. Clear CACHE_PATH and rerun.", file=sys.stderr)
             return 3
+        if args.no_score:
+            print_split(split_summary(records))
+            return 0
 
     to_score = [r for r in records if scorable(r)]
-    skipped = [
-        {"id": r["id"], "reason": "out_of_corpus" if r["category"] in UNSCORED_CATEGORIES else (r["error"] or r["terminated_at"] or "no answer")}
-        for r in records
-        if not scorable(r)
-    ]
-    previous = {row["id"]: row for row in read_jsonl(scores_path)}
+    skipped = [{"id": r["id"], "reason": skip_reason(r)} for r in records if not scorable(r)]
+    if not scores_path.exists():
+        append_jsonl(scores_path, {"_config": config})
+    previous = {row["id"]: row for row in read_jsonl(scores_path) if "id" in row}
     done = {i for i, row in previous.items() if row["status"] == "ok"}
     if args.resume:
         print(f"resuming: {len([r for r in to_score if r['id'] in done])} of {len(to_score)} already scored", flush=True)
 
-    scorer = Scorer()
-    for record in to_score:
-        if record["id"] in done:
-            continue
-        row = scorer.score(record)
-        append_jsonl(scores_path, row)
-        previous[record["id"]] = row
-        print(
-            f"[{row['id']}] {row['status']} {row['seconds']}s tokens={row['prompt_tokens']}+{row['completion_tokens']} "
-            f"429s={row['http_429']} {row['scores']}",
-            flush=True,
-        )
+    judge_model = os.environ.get("GROQ_EVAL_MODEL", "openai/gpt-oss-120b")
+    if any(r["id"] not in done for r in to_score):
+        scorer = Scorer()
+        judge_model = scorer.judge_model
+        for record in to_score:
+            if record["id"] in done:
+                continue
+            row = scorer.score(record)
+            append_jsonl(scores_path, row)
+            previous[record["id"]] = row
+            print(
+                f"[{row['id']}] {row['status']} {record['answer_source']} {row['seconds']}s "
+                f"tokens={row['prompt_tokens']}+{row['completion_tokens']} 429s={row['http_429']} {row['scores']}",
+                flush=True,
+            )
 
     rows = [previous[r["id"]] for r in to_score if r["id"] in previous]
-    scored = build_scored(args.run_name, args.from_raw, scorer.judge_model, rows, skipped)
+    scored = build_scored(args.run_name, args.from_raw, judge_model, config, records, rows, skipped)
     write_json(scored_path, scored)
-    print(json.dumps(scored["aggregate"], indent=2))
+    print_split(scored["split"])
+    summary = {"aggregate": scored["aggregate"], "out_of_corpus": scored["out_of_corpus"], "judge_usage": scored["judge_usage"]}
+    print(json.dumps(summary, indent=2))
     if scored["failed"]:
         print("FAILED questions:", ", ".join(f"{f['id']} ({'; '.join(f['failures'])[:150]})" for f in scored["failed"]))
     print(f"scored results: {scored_path}")
