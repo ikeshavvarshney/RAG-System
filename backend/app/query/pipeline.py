@@ -172,6 +172,19 @@ async def retrieve_and_rank(
 
     with stage("fusion"):
         fused = fuse(retrieval, dense_weight=settings.FUSION_DENSE_WEIGHT, k=settings.RRF_K)
+    logger.info(
+        "retrieval config: dense_weight=%s sparse_weight=%s rrf_k=%s top_k=%s queries=%d "
+        "vector_hits=%d keyword_hits=%d fused=%d rerank=%s",
+        settings.FUSION_DENSE_WEIGHT,
+        round(1.0 - settings.FUSION_DENSE_WEIGHT, 6),
+        settings.RRF_K,
+        settings.RETRIEVAL_TOP_K,
+        len(queries),
+        len(retrieval.vector_hits),
+        len(retrieval.keyword_hits),
+        len(fused),
+        settings.RERANK_ENABLED,
+    )
 
     with stage("sufficiency"):
         sufficiency = await assess(question, fused, session_scoped=corpus_scope != PERSISTENT_SCOPE)
@@ -179,7 +192,7 @@ async def retrieve_and_rank(
     web_search: WebSearchResult | None = None
     if not sufficiency.sufficient:
         with stage("web_search"):
-            web_search = await search_web(question)
+            web_search = await search_web(question, fused, sufficiency.missing)
 
     with stage("rerank"):
         pool = _rerank_pool(fused, web_search.candidates if web_search else [])
@@ -300,6 +313,16 @@ async def finalize_answer(
     )
 
 
+NO_RELEVANT_WEB = "The web search found nothing relevant to this topic, so this answer comes from the document alone."
+
+
+def _note_empty_web(final: FinalAnswer, searches: list[WebSearchResult | None]) -> None:
+    """A real answer whose web search only returned off-topic results says so, and is not served from the cache later."""
+    if final.citations and any(s is not None and s.all_dropped for s in searches):
+        final.answer = f"{final.answer}\n\n{NO_RELEVANT_WEB}"
+        final.cacheable = False
+
+
 async def _write_cache(raw_question: str, resolved_question: str, final: FinalAnswer, scope: str) -> None:
     if not final.cacheable:
         return
@@ -387,6 +410,7 @@ async def run_query(
             sub_contexts=[(sub.question, sub.context) for sub in sub_queries],
             corpus_scope=corpus_scope,
         )
+        _note_empty_web(final, [sub.web_search for sub in sub_queries])
         if not bypass_cache:
             await _write_cache(sanitized, resolved_question, final, corpus_scope)
         record_turn(session_id, sanitized, resolved_question, final.summary)
@@ -413,6 +437,7 @@ async def run_query(
     final = await finalize_answer(
         resolved_question, stage, passages=ranked.context.passages, corpus_scope=corpus_scope
     )
+    _note_empty_web(final, [ranked.web_search])
     if not bypass_cache:
         await _write_cache(sanitized, resolved_question, final, corpus_scope)
     record_turn(session_id, sanitized, resolved_question, final.summary)

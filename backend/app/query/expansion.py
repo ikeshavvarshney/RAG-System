@@ -30,6 +30,8 @@ def _clean_variants(parsed: object, original: str) -> list[str]:
 
 
 async def expand_query(question: str) -> list[str]:
+    if not settings.EXPANSION_ENABLED:
+        return [question]
     wanted = settings.EXPANSION_COUNT - 1
     parsed = await llm.generate_json(
         "query_expansion", _PROMPT.format(count=wanted, question=question), _MAX_OUTPUT_TOKENS

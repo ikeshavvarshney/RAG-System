@@ -192,3 +192,37 @@ def test_every_call_logs_verdict_method_and_reason(fake_llm, caplog):
     assert len(messages) == 2
     assert "method=llm" in messages[0] and "only shares a topic" in messages[0] and "sufficient=False" in messages[0]
     assert "method=score" in messages[1] and "sufficient=True" in messages[1]
+
+
+def test_partial_verdict_is_not_sufficient_and_names_the_missing_part(fake_llm):
+    fake_llm.replies[STAGE] = json.dumps({"verdict": "partial", "reason": "covers one part", "missing": "the second part"})
+
+    result = _assess([_candidate("a", dense=0.85)])
+
+    assert not result.sufficient and result.partial
+    assert result.missing == "the second part" and result.method == "llm"
+
+
+def test_verdict_key_sufficient_passes_and_missing_is_ignored_unless_partial(fake_llm):
+    fake_llm.replies[STAGE] = json.dumps({"verdict": "sufficient", "reason": "ok", "missing": "stray"})
+
+    result = _assess([_candidate("a", dense=0.85)])
+
+    assert result.sufficient and not result.partial and result.missing == ""
+
+
+def test_unknown_verdict_value_falls_back_insufficient(fake_llm):
+    fake_llm.replies[STAGE] = json.dumps({"verdict": "maybe", "reason": "x"})
+
+    result = _assess([_candidate("a", dense=0.85)])
+
+    assert not result.sufficient and result.method == "fallback"
+
+
+def test_prompt_carries_the_general_relative_reference_rules(fake_llm):
+    fake_llm.replies[STAGE] = json.dumps({"verdict": "insufficient", "reason": "no"})
+
+    _assess([_candidate("a", dense=0.85)])
+
+    prompt = fake_llm.calls[0][1]
+    assert "relative references" in prompt and "partial" in prompt

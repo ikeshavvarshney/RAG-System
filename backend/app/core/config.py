@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     QUERY_MAX_CHARS: int = 2000
     # Total queries sent to dense search, the original included.
     EXPANSION_COUNT: int = Field(default=4, ge=3, le=5)
+    EXPANSION_ENABLED: bool = True
     RETRIEVAL_TOP_K: int = 20
     HISTORY_MAX_TURNS: int = 3
     HISTORY_MAX_SESSIONS: int = 1000
@@ -67,6 +68,7 @@ class Settings(BaseSettings):
     # Dense share of the RRF score, the RQ1 ablation variable. 1.0 is dense-only, 0.0 sparse-only.
     FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)
     RRF_K: int = Field(default=60, ge=1)
+    RERANK_ENABLED: bool = True
     RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     # Measured on a 2-core CPU with 500-token chunks: 30 at 512 tokens took ~4s, 20 at 256 ~1.3s.
     RERANK_CANDIDATES: int = Field(default=20, ge=1)
@@ -101,6 +103,14 @@ class Settings(BaseSettings):
     WEB_SEARCH_EXHAUSTED_BLOCK_SEC: int = Field(default=3600, ge=1)
     # Web results allowed into the rerank pool: fused[:RERANK_CANDIDATES - n_web] + web[:WEB_MAX_IN_POOL].
     WEB_MAX_IN_POOL: int = Field(default=5, ge=0)
+    # The Tavily query is rewritten from the question plus short excerpts of the retrieved document passages.
+    WEB_QUERY_REWRITE_ENABLED: bool = True
+    WEB_QUERY_CONTEXT_PASSAGES: int = Field(default=3, ge=1)
+    WEB_QUERY_PASSAGE_CHARS: int = Field(default=300, ge=50)
+    # Web results scoring below this cosine similarity to the rewritten query (local sentence embeddings) are dropped.
+    WEB_RELEVANCE_ENABLED: bool = True
+    WEB_RELEVANCE_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    WEB_RELEVANCE_MIN_SCORE: float = Field(default=0.30, ge=0.0, le=1.0)
 
 #---OCR engine ---
     # "paddle"            plain PP-OCR recognition, ~3s/page (default)

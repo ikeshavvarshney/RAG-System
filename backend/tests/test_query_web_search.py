@@ -262,3 +262,82 @@ def test_usage_label_carries_the_search_depth(tavily, monkeypatch):
     _search()
 
     assert [entry.model for entry in web_search.tracker._entries] == ["tavily-advanced"]
+
+
+def _doc_passage(text="Passage about a quarterly report.", doc="report.docx"):
+    from app.query.fusion import Candidate
+
+    return Candidate("c1", text, {"source_doc": doc, "location": "Plan"}, 0.1)
+
+
+def test_query_is_rewritten_from_document_excerpts(fake_llm):
+    fake_llm.replies["query_web_rewrite"] = '"quarterly report planned work"\n'
+
+    query = asyncio.run(web_search.build_web_query("what is next?", [_doc_passage()], "the next quarter"))
+
+    prompt = fake_llm.calls[0][1]
+    assert query == "quarterly report planned work"
+    assert "Passage about a quarterly report." in prompt and "report.docx" in prompt and "the next quarter" in prompt
+
+
+def test_plain_question_is_used_without_document_passages(fake_llm):
+    query = asyncio.run(web_search.build_web_query("what is next?", []))
+
+    assert query == "what is next?" and fake_llm.calls == []
+
+
+def test_plain_question_is_used_when_the_rewrite_call_fails(fake_llm):
+    fake_llm.replies["query_web_rewrite"] = RuntimeError("down")
+
+    assert asyncio.run(web_search.build_web_query("what is next?", [_doc_passage()])) == "what is next?"
+
+
+def test_rewrite_can_be_switched_off(fake_llm, monkeypatch):
+    monkeypatch.setattr(settings, "WEB_QUERY_REWRITE_ENABLED", False)
+
+    assert asyncio.run(web_search.build_web_query("what is next?", [_doc_passage()])) == "what is next?"
+    assert fake_llm.calls == []
+
+
+def test_search_sends_the_rewritten_query_and_drops_irrelevant_results(tavily, fake_llm, monkeypatch):
+    fake_llm.replies["query_web_rewrite"] = "quarterly report planned work"
+    tavily.script["k1"] = [{"results": [_item("https://a.example/1", "on topic", "Keep"), _item("https://b.example/2", "off topic", "Drop")]}]
+    scores = {"on topic": 0.8, "off topic": 0.1}
+    monkeypatch.setattr(web_search, "_relevance_scores", lambda query, cands: [scores[c.text] for c in cands])
+
+    result = asyncio.run(search_web("what is next?", [_doc_passage()]))
+
+    assert tavily.calls[0][1] == "quarterly report planned work"
+    assert [c.metadata["title"] for c in result.candidates] == ["Keep"]
+    assert result.dropped == 1 and result.query == "quarterly report planned work" and not result.all_dropped
+
+
+def test_all_results_dropped_is_reported(tavily, fake_llm, monkeypatch):
+    fake_llm.replies["query_web_rewrite"] = "quarterly report planned work"
+    tavily.script["k1"] = [{"results": [_item("https://a.example/1", "off topic", "Drop")]}]
+    monkeypatch.setattr(web_search, "_relevance_scores", lambda query, cands: [0.05 for _ in cands])
+
+    result = asyncio.run(search_web("what is next?", [_doc_passage()]))
+
+    assert result.candidates == [] and result.all_dropped
+
+
+def test_a_plain_query_is_not_filtered(tavily, monkeypatch):
+    tavily.script["k1"] = [{"results": [_item()]}]
+    monkeypatch.setattr(web_search, "_relevance_scores", lambda *a: pytest.fail("filter must not run"))
+
+    result = _search("plain question")
+
+    assert len(result.candidates) == 1 and result.dropped == 0
+
+
+def test_a_failing_relevance_model_keeps_every_result(monkeypatch):
+    def boom(query, cands):
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(web_search, "_relevance_scores", boom)
+    cands = normalize_results({"results": [_item()]}, "q")
+
+    kept, dropped = web_search.filter_relevant("q", cands)
+
+    assert kept == cands and dropped == 0

@@ -86,7 +86,7 @@ def rerank_and_consolidate(question: str, candidates: list[Candidate]) -> Ranked
     """Rerank against the user's question, not the expansions, then fit the budget."""
     shortlist = candidates[: settings.RERANK_CANDIDATES]
     reranked = False
-    if shortlist:
+    if shortlist and settings.RERANK_ENABLED:
         try:
             shortlist = _rerank(question, shortlist)
             reranked = True

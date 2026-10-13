@@ -500,7 +500,7 @@ def test_sufficient_retrieval_skips_web_search(fake_llm, corpus, monkeypatch):
     fake_llm.replies["query_expansion"] = "[]"
     searched: list[str] = []
 
-    async def fake_search(question):
+    async def fake_search(question, passages=None, missing=""):
         searched.append(question)
         return WebSearchResult(_web(2), "ok")
 
@@ -518,7 +518,7 @@ def test_insufficient_retrieval_adds_web_results_to_the_context(fake_llm, corpus
     fake_llm.replies["query_expansion"] = "[]"
     searched: list[str] = []
 
-    async def fake_search(question):
+    async def fake_search(question, passages=None, missing=""):
         searched.append(question)
         return WebSearchResult(_web(2), "ok")
 
@@ -603,7 +603,7 @@ def test_web_results_survive_a_failed_rerank(fake_llm, corpus, insufficient, mon
     fake_llm.replies["query_guardrail"] = SAFE
     fake_llm.replies["query_expansion"] = "[]"
 
-    async def fake_search(question):
+    async def fake_search(question, passages=None, missing=""):
         return WebSearchResult(_web(2), "ok")
 
     class Broken:
@@ -723,3 +723,23 @@ def test_sub_questions_share_the_session_scope(fake_llm, session_uploads):
 
     hits = [h for sq in result.sub_queries for h in sq.retrieval.vector_hits + sq.retrieval.keyword_hits]
     assert {h.chunk_id for h in hits} == {"u1"}
+
+
+def test_note_is_added_only_to_a_real_answer_whose_web_results_were_all_dropped():
+    from app.query.pipeline import NO_RELEVANT_WEB, FinalAnswer, _note_empty_web
+    from app.query.web_search import WebSearchResult
+
+    def final(citations):
+        return FinalAnswer(None, "Answer.", citations, None, None, [], "s", True)
+
+    dropped_all = WebSearchResult([], "ok", None, "q", 3)
+    cited = final([object()])
+    _note_empty_web(cited, [dropped_all])
+    assert cited.answer == f"Answer.\n\n{NO_RELEVANT_WEB}" and not cited.cacheable
+
+    for other in (final([]), final([object()])):
+        _note_empty_web(other, [WebSearchResult([], "ok", None, "q", 0), None])
+        assert other.answer == "Answer." and other.cacheable
+    uncited = final([])
+    _note_empty_web(uncited, [dropped_all])
+    assert uncited.answer == "Answer."
