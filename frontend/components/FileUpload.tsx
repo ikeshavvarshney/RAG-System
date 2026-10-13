@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { Close, Upload } from "@/components/Icons";
 import SessionDocuments from "@/components/SessionDocuments";
 import {
   ACCEPTED_EXTENSIONS,
@@ -33,7 +34,7 @@ const TARGETS: { value: IngestTarget; label: string; hint: string }[] = [
   },
   {
     value: "session",
-    label: "This session only",
+    label: "This session",
     hint: "Kept in a separate store, never mixed into the corpus, and discarded when the session ends.",
   },
 ];
@@ -45,7 +46,6 @@ export default function FileUpload({ onIngested }: Props) {
   const [dragging, setDragging] = useState(false);
   const [target, setTarget] = useState<IngestTarget>("corpus");
   const [clearing, setClearing] = useState(false);
-  // Bumped after any mutation so the document list refetches.
   const [refreshToken, setRefreshToken] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -61,9 +61,7 @@ export default function FileUpload({ onIngested }: Props) {
       const reason = rejectionReason(file);
       if (reason) {
         refused.push({ name: file.name, reason });
-      } else if (
-        !queue.some((q) => q.name === file.name && q.size === file.size)
-      ) {
+      } else if (!queue.some((q) => q.name === file.name && q.size === file.size)) {
         accepted.push(file);
       }
     }
@@ -107,11 +105,7 @@ export default function FileUpload({ onIngested }: Props) {
       const result = await ingestFiles(
         queue,
         (fraction) => {
-          // After the bytes land, the wait is extraction and embedding, which
-          // report nothing. The label has to change or the page reads as stalled.
-          setPhase(
-            fraction >= 1 ? { kind: "processing" } : { kind: "uploading", fraction },
-          );
+          setPhase(fraction >= 1 ? { kind: "processing" } : { kind: "uploading", fraction });
         },
         sessionId,
       );
@@ -147,14 +141,18 @@ export default function FileUpload({ onIngested }: Props) {
   const activeTarget = TARGETS.find((option) => option.value === target)!;
 
   return (
-    <div className="border-b border-neutral-200 px-4 py-4">
-      <fieldset className="mb-3" disabled={busy}>
-        <legend className="sr-only">Where to store these documents</legend>
-        <div className="flex items-center gap-4">
+    <div>
+      <fieldset disabled={busy}>
+        <legend className="text-xs font-medium text-ink-2">Add to</legend>
+        <div className="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-sunken p-1">
           {TARGETS.map((option) => (
             <label
               key={option.value}
-              className="flex items-center gap-1.5 text-sm text-neutral-700"
+              className={`cursor-pointer rounded-md px-2 py-1.5 text-center text-sm transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${
+                target === option.value
+                  ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(11_11_11/0.08)]"
+                  : "text-ink-2 hover:text-ink"
+              }`}
             >
               <input
                 type="radio"
@@ -162,24 +160,13 @@ export default function FileUpload({ onIngested }: Props) {
                 value={option.value}
                 checked={target === option.value}
                 onChange={() => setTarget(option.value)}
-                className="accent-neutral-900"
+                className="sr-only"
               />
               {option.label}
             </label>
           ))}
-
-          {target === "session" && (
-            <button
-              type="button"
-              onClick={handleClearSession}
-              disabled={busy || clearing}
-              className="ml-auto text-xs text-neutral-500 hover:text-neutral-900 disabled:opacity-40"
-            >
-              {clearing ? "Clearing..." : "Clear session uploads"}
-            </button>
-          )}
         </div>
-        <p className="mt-1 text-xs text-neutral-400">{activeTarget.hint}</p>
+        <p className="mt-2 text-xs leading-relaxed text-muted">{activeTarget.hint}</p>
       </fieldset>
 
       <div
@@ -189,23 +176,24 @@ export default function FileUpload({ onIngested }: Props) {
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
-        className={`rounded-lg border border-dashed px-4 py-6 text-center ${
-          dragging ? "border-neutral-900 bg-neutral-50" : "border-neutral-300"
+        className={`mt-4 rounded-lg border border-dashed px-4 py-6 text-center transition-colors ${
+          dragging ? "border-accent bg-accent-soft" : "border-line-strong bg-surface"
         }`}
       >
-        <p className="text-sm text-neutral-600">
+        <Upload className="mx-auto mb-2 text-muted" width="18" height="18" />
+        <p className="text-sm text-ink-2">
           Drop documents here, or{" "}
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={busy}
-            className="underline underline-offset-2 hover:text-neutral-900 disabled:opacity-40"
+            className="font-medium text-accent-strong underline hover:text-ink disabled:opacity-40"
           >
             choose files
           </button>
         </p>
-        <p className="mt-1 text-xs text-neutral-400">
-          PDF, DOCX, JPG, PNG &middot; up to {MAX_FILES_PER_REQUEST} files
+        <p className="mt-1 text-xs text-muted">
+          PDF, DOCX, JPG, PNG. Up to {MAX_FILES_PER_REQUEST} files, 50 MB each.
         </p>
         <input
           ref={inputRef}
@@ -218,24 +206,19 @@ export default function FileUpload({ onIngested }: Props) {
       </div>
 
       {queue.length > 0 && (
-        <ul className="mt-3 space-y-1">
+        <ul className="mt-3 divide-y divide-line border-y border-line">
           {queue.map((file, index) => (
-            <li
-              key={`${file.name}-${file.size}`}
-              className="flex items-center gap-3 text-sm"
-            >
-              <span className="truncate text-neutral-700">{file.name}</span>
-              <span className="shrink-0 text-xs text-neutral-400">
-                {formatBytes(file.size)}
-              </span>
+            <li key={`${file.name}-${file.size}`} className="flex items-center gap-2 py-1.5 text-sm">
+              <span className="truncate text-ink">{file.name}</span>
+              <span className="tnum shrink-0 text-xs text-muted">{formatBytes(file.size)}</span>
               <button
                 type="button"
                 onClick={() => removeAt(index)}
                 disabled={busy}
                 aria-label={`Remove ${file.name}`}
-                className="ml-auto shrink-0 text-xs text-neutral-400 hover:text-neutral-900 disabled:opacity-40"
+                className="ml-auto shrink-0 rounded p-1 text-muted hover:bg-sunken hover:text-ink disabled:opacity-40"
               >
-                remove
+                <Close width="14" height="14" />
               </button>
             </li>
           ))}
@@ -245,8 +228,8 @@ export default function FileUpload({ onIngested }: Props) {
       {rejected.length > 0 && (
         <ul className="mt-3 space-y-1">
           {rejected.map((item) => (
-            <li key={item.name} className="text-sm text-red-600">
-              {item.name} &mdash; {item.reason}
+            <li key={item.name} className="text-xs text-bad">
+              {item.name}: {item.reason}
             </li>
           ))}
         </ul>
@@ -257,10 +240,10 @@ export default function FileUpload({ onIngested }: Props) {
           type="button"
           onClick={handleUpload}
           disabled={busy}
-          className="mt-3 rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+          className="mt-3 w-full rounded-md bg-ink px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-ink/85 disabled:opacity-40"
         >
           {busy
-            ? "Working..."
+            ? "Working"
             : `Ingest ${queue.length} file${queue.length === 1 ? "" : "s"} into ${
                 target === "corpus" ? "the corpus" : "this session"
               }`}
@@ -270,10 +253,20 @@ export default function FileUpload({ onIngested }: Props) {
       <Status phase={phase} />
 
       {target === "session" && (
-        <SessionDocuments
-          refreshToken={refreshToken}
-          onChanged={() => setPhase({ kind: "idle" })}
-        />
+        <>
+          <SessionDocuments
+            refreshToken={refreshToken}
+            onChanged={() => setPhase({ kind: "idle" })}
+          />
+          <button
+            type="button"
+            onClick={handleClearSession}
+            disabled={busy || clearing}
+            className="mt-3 text-xs text-ink-2 underline decoration-line-strong hover:text-ink disabled:opacity-40"
+          >
+            {clearing ? "Clearing" : "Clear session uploads"}
+          </button>
+        </>
       )}
     </div>
   );
@@ -283,15 +276,14 @@ function Status({ phase }: { phase: Phase }) {
   if (phase.kind === "idle") return null;
 
   if (phase.kind === "uploading") {
+    const percent = Math.round(phase.fraction * 100);
     return (
-      <div className="mt-3">
-        <p className="text-sm text-neutral-600">
-          Uploading {Math.round(phase.fraction * 100)}%
-        </p>
-        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-neutral-200">
+      <div className="mt-3" role="status">
+        <p className="tnum text-xs text-ink-2">Uploading {percent}%</p>
+        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-line">
           <div
-            className="h-full bg-neutral-900 transition-[width] duration-150"
-            style={{ width: `${Math.round(phase.fraction * 100)}%` }}
+            className="h-full bg-accent transition-[width] duration-150"
+            style={{ width: `${percent}%` }}
           />
         </div>
       </div>
@@ -300,15 +292,20 @@ function Status({ phase }: { phase: Phase }) {
 
   if (phase.kind === "processing") {
     return (
-      <p className="mt-3 text-sm text-neutral-600">
-        Extracting and indexing. Figures and scanned pages each cost a vision
-        call, so this can take a few minutes.
+      <p className="mt-3 flex gap-2 text-xs leading-relaxed text-ink-2" role="status">
+        <span className="mt-1.5 size-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+        Extracting and indexing. Figures each cost a vision call, so this can
+        take a few minutes.
       </p>
     );
   }
 
   if (phase.kind === "error") {
-    return <p className="mt-3 text-sm text-red-600">{phase.message}</p>;
+    return (
+      <p role="alert" className="mt-3 text-xs text-bad">
+        {phase.message}
+      </p>
+    );
   }
 
   const { result } = phase;
@@ -317,15 +314,14 @@ function Status({ phase }: { phase: Phase }) {
   );
 
   return (
-    <div className="mt-3 text-sm">
-      <p className="text-neutral-700">
+    <div className="mt-3 text-xs leading-relaxed">
+      <p className="text-ink">
         Indexed {result.indexed.total} passage
-        {result.indexed.total === 1 ? "" : "s"} from{" "}
-        {result.succeeded.length} document
+        {result.indexed.total === 1 ? "" : "s"} from {result.succeeded.length} document
         {result.succeeded.length === 1 ? "" : "s"} into{" "}
         {result.corpus_scope === "persistent" ? "the corpus" : "this session"}
         {methods.length > 0 && (
-          <span className="text-neutral-500">
+          <span className="text-muted">
             {" "}
             ({methods.map(([name, count]) => `${count} ${name}`).join(", ")})
           </span>
@@ -336,8 +332,8 @@ function Status({ phase }: { phase: Phase }) {
       {result.failed.length > 0 && (
         <ul className="mt-2 space-y-1">
           {result.failed.map((failure) => (
-            <li key={failure.filename} className="text-red-600">
-              {failure.filename} &mdash; {failure.reason}
+            <li key={failure.filename} className="text-bad">
+              {failure.filename}: {failure.reason}
             </li>
           ))}
         </ul>

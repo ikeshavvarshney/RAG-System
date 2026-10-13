@@ -1,8 +1,16 @@
 # Frontend
 
-Next.js (App Router) web interface for the Multimodal Hybrid-Retrieval RAG Framework. Provides document upload, chat-style querying, citation display, live pipeline-stage progress, and per-query token and cost reporting.
+Next.js (App Router) web interface for the Multimodal Hybrid-Retrieval RAG Framework. Provides document upload, chat-style querying, citation display, live pipeline-stage progress, per-query token and cost reporting, and an evaluation dashboard.
 
 Requirements covered: FRONTEND-01 to FRONTEND-05. See [02. Requirements Specification](../docs/02-requirements-specification.md).
+
+## Pages
+
+| Route | Contents |
+|---|---|
+| `/` | Overview of the system and its pipeline |
+| `/chat` | Document upload and cited question answering |
+| `/evaluation` | RAGAS results per run, run comparison, and a form that starts a run |
 
 ## Stack
 

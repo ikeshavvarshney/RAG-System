@@ -95,7 +95,7 @@ From `frontend/`:
 npm run dev
 ```
 
-Serves on http://localhost:3000, with the overview page at `/` and the chat at `/chat`.
+Serves on http://localhost:3000, with the overview page at `/`, the chat at `/chat`, and the evaluation dashboard at `/evaluation`.
 
 Questions asked in the chat go to `POST /api/query/stream`. While the pipeline runs the chat lists each stage as it starts and finishes; the answer then shows numbered citations (a document and page, or a web URL), a fact-check score, and an expandable breakdown of tokens and estimated cost per stage. The cost uses the Gemini list prices in `frontend/lib/pricing.ts`; update them there if the models or prices change.
 
@@ -308,6 +308,14 @@ The `naive` preset is dense-only retrieval with no expansion, reranking, or deco
 python scripts/ingest_naive.py --dry-run     # count chunks, embed nothing
 python scripts/ingest_naive.py               # build data/chroma_naive
 ```
+
+### From the browser
+
+The evaluation page at http://localhost:3000/evaluation shows every run in `eval/results/`: the four metric averages, where answers came from, scores by question category, and each question with its answer beside the reference answer. Choosing a second run under "Compare with" shows the difference per metric over the questions both runs answered from the corpus.
+
+The same page can start a run. It takes a run name, either the first N questions or the whole set, and one of three configurations (full pipeline, naive baseline, or a chosen fusion weight), then shows progress and the tail of the log while the harness runs. The backend starts `eval/run_eval.py` as a child process, one run at a time, through `POST /api/eval/runs`. A run that was stopped can be resumed under the same name.
+
+### Comparing runs from a terminal
 
 Compare two scored runs, using only the questions both answered from the corpus:
 

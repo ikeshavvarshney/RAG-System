@@ -45,40 +45,45 @@ export default function UsagePanel({ events }: { events: UsageEvent[] }) {
   const unpriced = rows.some((row) => row.unpriced);
 
   return (
-    <details className="mt-3 border-t border-neutral-200 pt-2">
-      <summary className="cursor-pointer text-xs text-neutral-500">
-        {number.format(tokens)} tokens, est. {formatCost(cost)}
-        {unpriced && "+"}
+    <details className="group">
+      <summary className="cursor-pointer list-none text-xs text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span className="tnum">{number.format(tokens)}</span> tokens, est.{" "}
+        <span className="tnum">
+          {formatCost(cost)}
+          {unpriced && "+"}
+        </span>
       </summary>
-      <table className="mt-2 w-full text-xs tabular-nums">
-        <thead className="text-left text-neutral-400">
-          <tr>
-            <th className="font-normal">Stage</th>
-            <th className="text-right font-normal">In</th>
-            <th className="text-right font-normal">Out</th>
-            <th className="text-right font-normal">Cost</th>
+      <table className="tnum mt-2 w-full max-w-md text-xs">
+        <thead className="text-left text-muted">
+          <tr className="border-b border-line">
+            <th className="py-1 font-normal">Stage</th>
+            <th className="py-1 text-right font-normal">In</th>
+            <th className="py-1 text-right font-normal">Out</th>
+            <th className="py-1 text-right font-normal">Cost</th>
           </tr>
         </thead>
-        <tbody className="text-neutral-600">
+        <tbody className="text-ink-2">
           {rows.map((row) => (
             <tr key={row.stage} title={[...row.models].join(", ")}>
-              <td>{row.stage.replace(/^query_/, "").replace(/_/g, " ")}</td>
+              <td className="py-0.5 capitalize">{row.stage.replace(/^query_/, "").replace(/_/g, " ")}</td>
               {row.prompt + row.output === 0 ? (
                 <td colSpan={2} className="text-right">
                   {row.calls} {row.calls === 1 ? "request" : "requests"}
                 </td>
               ) : (
                 <>
-                  <td className="text-right">{number.format(row.prompt)}</td>
-                  <td className="text-right">{number.format(row.output)}</td>
+                  <td className="text-right font-mono text-[11px]">{number.format(row.prompt)}</td>
+                  <td className="text-right font-mono text-[11px]">{number.format(row.output)}</td>
                 </>
               )}
-              <td className="text-right">{row.unpriced ? "n/a" : formatCost(row.cost)}</td>
+              <td className="text-right font-mono text-[11px]">
+                {row.unpriced ? "n/a" : formatCost(row.cost)}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="mt-1 text-[11px] text-neutral-400">
+      <p className="mt-1.5 text-[11px] text-muted">
         Estimated from Gemini list prices and the Tavily pay-as-you-go rate per search.
       </p>
     </details>

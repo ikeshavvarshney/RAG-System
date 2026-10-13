@@ -213,7 +213,7 @@ backend/
     chains.py            The ingestion and query chains the HTTP handlers invoke
     core/                Configuration, logging, API key rotation, Gemini client, usage tracking
     api/                 Response schemas, error bodies, SSE streaming, request logging
-      routes/            HTTP endpoints
+      routes/            HTTP endpoints, including the evaluation dashboard API
     ingestion/
       router.py          Type routing by magic bytes
       vision_select.py   Batch-wide choice of the pages and images sent to vision
