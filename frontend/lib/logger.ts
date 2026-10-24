@@ -16,8 +16,9 @@ export function log(level: Level, message: string, details?: Record<string, unkn
 }
 
 export function levelForStatus(status: number): Level {
-  if (status >= 500 || status === 0) return "error";
-  if (status >= 400) return "warn";
+  if (status >= 500) return "error";
+  // 0 is an unreachable backend, which is normal while it starts up.
+  if (status >= 400 || status === 0) return "warn";
   return "info";
 }
 

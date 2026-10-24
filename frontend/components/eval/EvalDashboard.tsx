@@ -22,6 +22,7 @@ import {
 } from "@/lib/eval";
 
 const POLL_MS = 3000;
+const RETRY_MS = 3000;
 
 function when(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString(undefined, {
@@ -51,6 +52,8 @@ export default function EvalDashboard() {
   const [other, setOther] = useState<RunDetail | null>(null);
   const [status, setStatus] = useState<JobStatus>({ state: "idle" });
   const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const wasRunning = useRef(false);
 
   const applyRuns = useCallback((fetched: RunSummary[], prefer?: string) => {
@@ -64,20 +67,25 @@ export default function EvalDashboard() {
 
   useEffect(() => {
     let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     Promise.all([fetchReference(), fetchStatus(), fetchRuns()])
       .then(([fetchedReference, fetchedStatus, fetchedRuns]) => {
         if (!active) return;
         setReference(fetchedReference);
         setStatus(fetchedStatus);
         applyRuns(fetchedRuns);
+        setWaiting(false);
       })
-      .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : String(caught));
+      .catch(() => {
+        if (!active) return;
+        setWaiting(true);
+        retry = setTimeout(() => setAttempt((count) => count + 1), RETRY_MS);
       });
     return () => {
       active = false;
+      clearTimeout(retry);
     };
-  }, [applyRuns]);
+  }, [applyRuns, attempt]);
 
   useEffect(() => {
     if (status.state !== "running") return;
@@ -219,7 +227,14 @@ export default function EvalDashboard() {
         </p>
       )}
 
-      {!error && runs === null && <p className="mt-12 text-sm text-muted">Loading runs</p>}
+      {!error && runs === null && (
+        <p className="mt-12 flex max-w-xl gap-2.5 text-sm leading-relaxed text-ink-2" role="status">
+          {waiting && <span className="mt-2 size-1.5 shrink-0 animate-pulse rounded-full bg-warn" />}
+          {waiting
+            ? "Waiting for the backend at localhost:8000. It can take a minute to start, and this page keeps checking on its own."
+            : "Loading runs"}
+        </p>
+      )}
 
       {runs !== null && runs.length === 0 && (
         <div className="mt-12 max-w-xl border-l border-line-strong pl-4">

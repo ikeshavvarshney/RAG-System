@@ -7,21 +7,24 @@ import { listCorpusDocuments, type CorpusDocument } from "@/lib/viewer";
 export default function CorpusDocuments({ refreshToken }: { refreshToken: number }) {
   const [documents, setDocuments] = useState<CorpusDocument[] | null>(null);
   const [filter, setFilter] = useState("");
+  const [attempt, setAttempt] = useState(0);
   const openViewer = useOpenViewer();
 
   useEffect(() => {
     let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     listCorpusDocuments()
       .then((fetched) => {
         if (active) setDocuments(fetched);
       })
       .catch(() => {
-        if (active) setDocuments([]);
+        if (active) retry = setTimeout(() => setAttempt((count) => count + 1), 5000);
       });
     return () => {
       active = false;
+      clearTimeout(retry);
     };
-  }, [refreshToken]);
+  }, [refreshToken, attempt]);
 
   if (!documents || documents.length === 0) return null;
 
