@@ -504,7 +504,7 @@ def write_report(records: list[Record], preface: str, stopped: str | None) -> No
         "",
         f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} by `scripts/e2e_week6.py` against the real corpus with real Gemini and Tavily keys.",
         "",
-        "**Generation model: `gemini-3.5-flash`** (the key has no Pro access). Query-stage model: `gemini-3.5-flash-lite`.",
+        "**Generation model: `gemini-3.5-flash-lite`.** Query-stage model: `gemini-3.5-flash-lite`.",
         "",
         preface,
         "",

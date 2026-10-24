@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     #--- Query pipeline (Week 4) ---
     QUERY_MODEL: str = "gemini-3.5-flash-lite"
-    GENERATION_MODEL: str = "gemini-3.5-flash"
+    GENERATION_MODEL: str = "gemini-3.5-flash-lite"
     GENERATION_MAX_OUTPUT_TOKENS: int = Field(default=2048, ge=64)
     QUERY_MAX_CHARS: int = 2000
     # Total queries sent to dense search, the original included.

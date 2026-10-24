@@ -10,8 +10,7 @@ Large-model inference is performed through hosted APIs. A few small models run l
 
 | Model | Location | Role |
 |---|---|---|
-| Gemini `gemini-3.5-flash` | API | Final answer generation with inline citations |
-| Gemini `gemini-3.5-flash-lite` | API | Vision extraction, groundedness and safety verification, query expansion, decomposition, conversational resolution, guardrails, sufficiency assessment, web query rewriting |
+| Gemini `gemini-3.5-flash-lite` | API | Final answer generation with inline citations, vision extraction, groundedness and safety verification, query expansion, decomposition, conversational resolution, guardrails, sufficiency assessment, web query rewriting |
 | Gemini `gemini-embedding-001` | API | Dense embeddings for passages and queries |
 | `ms-marco-MiniLM-L-6-v2` | Local, CPU | Cross-encoder reranking |
 | `all-MiniLM-L6-v2` | Local, CPU | Relevance filter for web search results |
@@ -21,7 +20,7 @@ Large-model inference is performed through hosted APIs. A few small models run l
 
 **Single provider for language and embedding models.** Generation, vision, and embeddings are all served by Gemini. The determining factor was operational simplicity rather than capability, since several providers offer comparable models on comparable free tiers. One provider means one credential pool to rotate and one rate limit to reason about, rather than three interacting limits whose combined behaviour under load is difficult to predict.
 
-**Fast model for auxiliary tasks.** Only final answer generation uses the larger model. That model was planned as Gemini Pro; the available API key has no Pro access, so generation runs on `gemini-3.5-flash` (`GENERATION_MODEL`), one tier above the auxiliary model. Switching to Pro later is a configuration change. Query expansion, decomposition, guardrail classification, sufficiency assessment, and conversational resolution are all comparatively simple transformations for which the faster and cheaper model is sufficient. Since the query pipeline executes several model calls in sequence, this choice has a direct and substantial effect on end-to-end latency.
+**One fast model for every language task.** Final answer generation was planned on a larger model: first Gemini Pro, which the available API key cannot access, then `gemini-3.5-flash`. It now runs on `gemini-3.5-flash-lite`, the same model as the auxiliary tasks, which lowers the cost and latency of the most expensive stage. The generation model is still its own setting (`GENERATION_MODEL`), so moving it back up a tier is a configuration change, and whether the smaller model costs answer quality is something the evaluation can measure by running the same questions under each. Query expansion, decomposition, guardrail classification, sufficiency assessment, and conversational resolution are all comparatively simple transformations for which the faster and cheaper model is sufficient. Since the query pipeline executes several model calls in sequence, this choice has a direct and substantial effect on end-to-end latency.
 
 **Fast model for vision extraction.** Vision extraction is the single heaviest ingestion cost against the free tier. The faster model is the default, subject to an explicit empirical check during development: both models are run against a sample of real corpus tables and compared on transcription quality before the full corpus is processed. Whichever is selected is then held fixed for the entire corpus, since RQ2 requires a consistent extraction baseline.
 

@@ -6,9 +6,9 @@ A record of the significant technical decisions taken during design, with the re
 
 ## 7.1 Model and Service Selection
 
-**D-01. Google Gemini as the primary model provider.** The larger model (`gemini-3.5-flash`, since the key has no Pro access) handles final answer generation; the faster model (`gemini-3.5-flash-lite`) handles vision extraction, answer verification, query expansion, decomposition, conversational resolution, guardrails, and sufficiency assessment.
+**D-01. Google Gemini as the primary model provider.** One model, `gemini-3.5-flash-lite`, handles final answer generation as well as vision extraction, answer verification, query expansion, decomposition, conversational resolution, guardrails, and sufficiency assessment.
 
-*Reasoning:* the deciding factor was operational rather than qualitative. Several providers offer comparable models on comparable free tiers. Serving generation, vision, and embeddings from one provider means one credential pool to rotate and one rate limit to reason about, rather than three interacting limits whose behaviour under load is difficult to predict. Reserving the larger model for generation alone materially reduces end-to-end latency, since the query pipeline performs several model calls in sequence.
+*Reasoning:* the deciding factor was operational rather than qualitative. Several providers offer comparable models on comparable free tiers. Serving generation, vision, and embeddings from one provider means one credential pool to rotate and one rate limit to reason about, rather than three interacting limits whose behaviour under load is difficult to predict. Generation was first planned on a larger model (Gemini Pro, which the key cannot access, then `gemini-3.5-flash`) and was moved to the fast model to cut the cost and latency of the most expensive stage; `GENERATION_MODEL` remains a separate setting so it can be moved back.
 
 **D-02. Gemini `gemini-embedding-001` for embeddings.** Same provider and credential surface as the language models.
 
