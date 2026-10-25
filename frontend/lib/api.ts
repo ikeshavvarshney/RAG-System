@@ -185,6 +185,21 @@ export async function deleteSession(): Promise<boolean> {
   return ((await response.json()) as { deleted: boolean }).deleted;
 }
 
+/** Forget this session's conversation turns; its uploads are kept. */
+export async function clearHistory(): Promise<void> {
+  const sessionId = currentSessionId();
+  if (!sessionId) return;
+
+  const response = await apiFetch(`/session/${sessionId}/history`, { method: "DELETE" });
+  if (response.status === 400) {
+    writeStoredId(null);
+    return;
+  }
+  if (!response.ok) {
+    throw new Error(`Could not start a new conversation: ${response.status}`);
+  }
+}
+
 export function fileExtension(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot === -1 ? "" : name.slice(dot).toLowerCase();

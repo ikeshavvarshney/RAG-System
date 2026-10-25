@@ -37,7 +37,7 @@ function group(events: UsageEvent[]): Row[] {
 
 const number = new Intl.NumberFormat("en-US");
 
-export default function UsagePanel({ events }: { events: UsageEvent[] }) {
+export default function UsagePanel({ events, buttonClass }: { events: UsageEvent[]; buttonClass: string }) {
   if (events.length === 0) return null;
   const rows = group(events);
   const tokens = rows.reduce((sum, row) => sum + row.prompt + row.output, 0);
@@ -46,14 +46,14 @@ export default function UsagePanel({ events }: { events: UsageEvent[] }) {
 
   return (
     <details className="group">
-      <summary className="cursor-pointer list-none text-xs text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
-        <span className="tnum">{number.format(tokens)}</span> tokens, est.{" "}
+      <summary className={`${buttonClass} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
         <span className="tnum">
-          {formatCost(cost)}
+          {number.format(tokens)} tokens · est. {formatCost(cost)}
           {unpriced && "+"}
         </span>
       </summary>
-      <table className="tnum mt-2 w-full max-w-md text-xs">
+      <div className="mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-md border border-line px-3 py-2.5">
+      <table className="tnum w-full text-xs">
         <thead className="text-left text-muted">
           <tr className="border-b border-line">
             <th className="py-1 font-normal">Stage</th>
@@ -83,9 +83,10 @@ export default function UsagePanel({ events }: { events: UsageEvent[] }) {
           ))}
         </tbody>
       </table>
-      <p className="mt-1.5 text-[11px] text-muted">
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
         Estimated from Gemini list prices and the Tavily pay-as-you-go rate per search.
       </p>
+      </div>
     </details>
   );
 }

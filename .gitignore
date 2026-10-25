@@ -48,3 +48,6 @@ backend/e2e_server.log
 # Eval harness raw/scored runs and logs
 eval/results/
 *.log
+
+DESIGN.md
+PRODUCT.md

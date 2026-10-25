@@ -1,111 +1,118 @@
 import Link from "next/link";
 import { ArrowRight } from "@/components/Icons";
+import SystemSnapshot from "@/components/SystemSnapshot";
 
 const PIPELINE = [
   {
     step: "Extract",
-    body: "PDFs, DOCX files and images are routed by their magic bytes, not their extension. Pages with a text layer are read directly. Pages that hold tables, charts or large figures are also rendered and sent to a vision model, which transcribes tables as markdown and describes charts by their axes and values. Scanned pages with no text layer go to OCR, which also takes over when the vision model fails.",
+    body: "Files are routed by their magic bytes. Text layers are read directly; pages with tables, charts or large figures are also rendered for a vision model, which transcribes tables as markdown and describes charts by axes and values. Scanned pages go to OCR, which also covers vision failures.",
   },
   {
     step: "Chunk",
-    body: "Passages are split at headings and paragraph breaks rather than fixed offsets, targeting 500 tokens. Tables are never split, because half a table answers nothing. Each passage keeps its source document, page number and nearest heading.",
+    body: "Passages split at headings and paragraph breaks, targeting 500 tokens. Tables are never split. Each passage keeps its document, page and nearest heading.",
   },
   {
     step: "Index",
-    body: "Every passage is embedded for dense retrieval and added to a BM25 keyword index. Two indexes over one set of passages: semantic search handles paraphrase, keyword search handles exact identifiers and proper nouns.",
+    body: "Every passage is embedded for dense retrieval and added to a BM25 keyword index: semantic search for paraphrase, keyword search for exact identifiers and names.",
   },
   {
     step: "Answer",
-    body: "A question is checked, rewritten against the conversation, and searched through both indexes. If the passages found cannot answer it, a web search fills the gap. The answer cites each claim to a document page or web page, and a fact check drops any claim its source does not support.",
+    body: "The question is checked, rewritten against the conversation and searched through both indexes, merged by rank fusion. If the passages cannot answer it, a web search fills the gap. Each claim is cited and fact-checked against its source.",
   },
 ];
 
 const FACTS = [
-  { term: "Formats", detail: "PDF, DOCX, JPG and PNG" },
+  { term: "Formats", detail: "PDF, DOCX, JPG, PNG" },
   { term: "Upload limits", detail: "60 files per upload, 50 MB each" },
-  { term: "Retrieval", detail: "Dense vectors and BM25, merged by rank fusion" },
+  { term: "Retrieval", detail: "Dense vectors + BM25, Reciprocal Rank Fusion" },
+  { term: "Generation", detail: "Gemini, with per-claim fact check" },
+  { term: "Fallback", detail: "Web search when the corpus cannot answer" },
   { term: "Evaluation", detail: "RAGAS, judged by a separate model family" },
 ];
 
 export default function Home() {
   return (
     <main className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-6xl px-4 pb-24 pt-14 sm:px-6 sm:pt-20">
-        <div className="max-w-3xl">
-          <h1 className="text-balance font-serif text-4xl font-medium leading-[1.08] tracking-tight sm:text-5xl">
-            Ask questions about documents whose answers sit in tables and charts
-          </h1>
-
-          <p className="mt-6 max-w-[62ch] text-base leading-relaxed text-ink-2">
-            A retrieval-augmented generation system for documents whose content
-            is not only text. Most of what a report actually says often sits in
-            its tables and charts, where ordinary text extraction either drops
-            it or flattens it into a row of numbers with no columns attached.
-            This system reads that content with a vision model and keeps its
-            structure, so a question whose answer lives in a table is still
-            answerable.
-          </p>
-
-          <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Link
-              href="/chat"
-              className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-ink/85"
-            >
-              Open the chat
-              <ArrowRight />
-            </Link>
-            <Link
-              href="/evaluation"
-              className="text-sm font-medium text-ink underline decoration-line-strong hover:decoration-ink"
-            >
-              See how it is evaluated
-            </Link>
+      <div className="mx-auto max-w-6xl px-4 pb-20 pt-12 sm:px-6 sm:pt-16">
+        <div className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_22rem] lg:items-start">
+          <div>
+            <h1 className="max-w-[22ch] text-balance text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+              Question answering over documents whose answers sit in tables and charts
+            </h1>
+            <p className="mt-5 max-w-[62ch] text-[15px] leading-relaxed text-ink-2">
+              Ordinary text extraction drops a report&apos;s tables and charts or flattens them into
+              numbers with no columns attached. This system reads them with a vision model, indexes
+              every passage for both semantic and keyword search, and answers with citations you can
+              open to the exact page.
+            </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Link
+                href="/chat"
+                className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-strong"
+              >
+                Open the chat
+                <ArrowRight width="15" height="15" />
+              </Link>
+              <Link
+                href="/evaluation"
+                className="inline-flex items-center gap-2 rounded-md border border-line-strong bg-raised px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-sunken"
+              >
+                View evaluation results
+              </Link>
+            </div>
           </div>
+
+          <SystemSnapshot />
         </div>
 
-        <section className="mt-20 grid gap-x-12 gap-y-6 lg:grid-cols-[14rem_1fr]">
-          <h2 className="font-serif text-2xl font-medium tracking-tight">
-            How a document becomes an answer
-          </h2>
-
-          <ol className="border-t border-line">
+        <section className="mt-16">
+          <h2 className="text-lg font-semibold tracking-tight">How a document becomes an answer</h2>
+          <ol className="mt-4 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-4">
             {PIPELINE.map((stage, index) => (
-              <li
-                key={stage.step}
-                className="grid gap-x-8 gap-y-1 border-b border-line py-5 sm:grid-cols-[9rem_1fr]"
-              >
-                <h3 className="flex items-baseline gap-3 text-sm font-medium">
-                  <span className="tnum font-mono text-xs text-muted">{index + 1}</span>
+              <li key={stage.step} className="bg-raised p-5">
+                <h3 className="flex items-center gap-2.5 text-sm font-semibold">
+                  <span className="tnum flex size-5 items-center justify-center rounded bg-accent-soft font-mono text-[11px] text-accent-strong">
+                    {index + 1}
+                  </span>
                   {stage.step}
                 </h3>
-                <p className="max-w-[68ch] text-sm leading-relaxed text-ink-2">{stage.body}</p>
+                <p className="mt-2.5 text-[13px] leading-relaxed text-ink-2">{stage.body}</p>
               </li>
             ))}
           </ol>
         </section>
 
-        <section className="mt-16 grid gap-x-12 gap-y-6 lg:grid-cols-[14rem_1fr]">
-          <h2 className="font-serif text-2xl font-medium tracking-tight">What works today</h2>
+        <section className="mt-14 grid gap-x-12 gap-y-6 lg:grid-cols-[1fr_1fr]">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">What to try</h2>
+            <ul className="mt-3 space-y-2.5 text-sm leading-relaxed text-ink-2">
+              <li>
+                <span className="font-medium text-ink">Ask a table or chart question.</span> Pick an
+                example on the chat page, then click a citation number to see the page with the
+                passage highlighted.
+              </li>
+              <li>
+                <span className="font-medium text-ink">Upload your own file.</span> Send it to this
+                session to keep it private and out of the shared corpus.
+              </li>
+              <li>
+                <span className="font-medium text-ink">Ask something the corpus cannot answer.</span>{" "}
+                The answer falls back to the web and cites those pages instead.
+              </li>
+              <li>
+                <span className="font-medium text-ink">Compare evaluation runs.</span> The evaluation
+                page compares configurations over the questions both answered from the corpus.
+              </li>
+            </ul>
+          </div>
 
           <div>
-            <p className="max-w-[68ch] text-sm leading-relaxed text-ink-2">
-              The full pipeline runs end to end. Upload documents on the chat
-              page and they are extracted, chunked and indexed; ask a question
-              and it is answered from the corpus, with inline citations to the
-              document and page. When the corpus cannot answer, the system
-              falls back to a web search and cites the pages it used. Every
-              answer is fact-checked against its sources, and the chat shows
-              each pipeline stage as it runs plus the tokens and estimated cost
-              it took. Ingestion is slow by nature, since every figure costs a
-              vision call, so expect minutes rather than seconds for a large
-              batch.
-            </p>
-
-            <dl className="mt-8 grid gap-x-10 border-t border-line sm:grid-cols-2">
+            <h2 className="text-lg font-semibold tracking-tight">Specification</h2>
+            <dl className="mt-3 overflow-hidden rounded-lg border border-line bg-raised">
               {FACTS.map((fact) => (
-                <div key={fact.term} className="border-b border-line py-3">
-                  <dt className="text-xs text-muted">{fact.term}</dt>
-                  <dd className="mt-0.5 text-sm text-ink">{fact.detail}</dd>
+                <div key={fact.term} className="grid grid-cols-[8rem_1fr] gap-3 border-b border-line px-4 py-2.5 text-sm last:border-b-0">
+                  <dt className="text-muted">{fact.term}</dt>
+                  <dd className="text-ink">{fact.detail}</dd>
                 </div>
               ))}
             </dl>

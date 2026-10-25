@@ -195,3 +195,66 @@ def test_deleting_removes_the_uploaded_original_only(tmp_path):
     document_files.delete(PERSISTENT_SCOPE, "report.pdf")
 
     assert document_files.find(PERSISTENT_SCOPE, "report.pdf").read_bytes() == b"fetched copy"
+
+
+def test_highlight_segments_keep_decimals_and_split_table_cells():
+    from app.api.routes.viewer import _segments
+
+    text = (
+        "With the $26.0 billion provided in the FY 2023 request, NASA will continue. Short.\n"
+        "| ($ in Billions) | FY 2022 | FY 2023 |\n"
+        "| --- | --- | --- |\n"
+        "| NASA Budget | 24.8 | 26.0 |"
+    )
+
+    segments = dict(_segments(text))
+
+    assert segments["With the $26.0 billion provided in the FY 2023 request, NASA will continue"] is False
+    assert "Short" not in segments
+    assert all(segments[cell] for cell in ["NASA Budget", "24.8", "26.0", "FY 2023"])
+    assert not any(set(segment) <= set("-: ") for segment in segments)
+
+
+def test_highlight_segments_search_text_layer_table_cells_one_per_line():
+    from app.api.routes.viewer import _segments
+
+    segments = list(_segments("($ in Billions) \nNASA Budget \n23.3 \n26.0 \n• \n"))
+
+    assert segments == [("($ in Billions)", True), ("NASA Budget", True), ("23.3", True), ("26.0", True)]
+
+
+def test_long_sentences_are_searched_to_the_end_in_word_aligned_windows():
+    from app.api.routes.viewer import _MAX_SEARCH_CHARS, _segments
+
+    sentence = (
+        "Advance robotic exploration of the Moon and Mars, including $486 million for lunar science "
+        "missions and $822 million for Mars Sample Return"
+    )
+
+    windows = [segment for segment, _ in _segments(sentence)]
+
+    assert all(len(window) <= _MAX_SEARCH_CHARS for window in windows)
+    assert " ".join(windows) == sentence
+    assert any("$822 million" in window for window in windows)
+
+
+def test_last_window_reaches_back_instead_of_leaving_a_stray_word():
+    from app.api.routes.viewer import _MIN_PROSE_CHARS, _segments
+
+    sentence = " ".join(["word"] * 18) + " development"
+
+    windows = [segment for segment, _ in _segments(sentence)]
+
+    assert len(windows) == 2
+    assert all(len(window) >= _MIN_PROSE_CHARS for window in windows)
+    assert windows[-1].endswith("word development")
+
+
+def test_overlapping_hits_on_a_line_merge_into_one_rect():
+    import pymupdf
+
+    from app.api.routes.viewer import _merge
+
+    merged = _merge([pymupdf.Rect(10, 100, 60, 110), pymupdf.Rect(40, 100, 90, 110), pymupdf.Rect(10, 120, 30, 130)])
+
+    assert merged == [pymupdf.Rect(10, 100, 90, 110), pymupdf.Rect(10, 120, 30, 130)]

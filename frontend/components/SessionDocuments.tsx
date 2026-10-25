@@ -1,55 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useOpenViewer } from "@/components/DocumentViewer";
-import {
-  deleteSessionDocument,
-  listSessionDocuments,
-  type SessionDocument,
-} from "@/lib/api";
+import { useState } from "react";
+import { useActiveViewer, useOpenViewer } from "@/components/DocumentViewer";
+import { Close } from "@/components/Icons";
+import { deleteSession, deleteSessionDocument, type SessionDocument } from "@/lib/api";
 
 interface Props {
-  /** Bumped by the parent after an ingest, to trigger a refetch. */
-  refreshToken: number;
-  onChanged?: () => void;
+  documents: SessionDocument[];
+  onChanged: () => void;
 }
 
-export default function SessionDocuments({ refreshToken, onChanged }: Props) {
-  const [documents, setDocuments] = useState<SessionDocument[]>([]);
+export default function SessionDocuments({ documents, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
-  const [reloads, setReloads] = useState(0);
   const openViewer = useOpenViewer();
+  const activeDoc = useActiveViewer()?.sourceDoc;
 
-  // Fetched on mount and after each mutation, never polled: this client is the
-  // only writer to its own session, so there is nothing to discover on a timer.
-  useEffect(() => {
-    let active = true;
-
-    listSessionDocuments()
-      .then((fetched) => {
-        // A response that arrived after a newer request was issued would
-        // otherwise overwrite fresher data.
-        if (!active) return;
-        setDocuments(fetched);
-        setError(null);
-      })
-      .catch((caught: unknown) => {
-        if (!active) return;
-        setError(caught instanceof Error ? caught.message : String(caught));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [refreshToken, reloads]);
-
-  async function handleRemove(sourceDoc: string) {
-    setRemoving(sourceDoc);
+  async function run(key: string, action: () => Promise<unknown>) {
+    setRemoving(key);
+    setError(null);
     try {
-      await deleteSessionDocument(sourceDoc);
-      setReloads((count) => count + 1);
-      onChanged?.();
+      await action();
+      onChanged();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -57,59 +29,70 @@ export default function SessionDocuments({ refreshToken, onChanged }: Props) {
     }
   }
 
-  if (error) {
-    return (
-      <p role="alert" className="mt-3 text-xs text-bad">
-        {error}
-      </p>
-    );
-  }
-
-  if (documents.length === 0) {
-    return (
-      <p className="mt-4 text-xs leading-relaxed text-muted">
-        Nothing uploaded to this session yet. While it holds documents,
-        questions are answered from those alone.
-      </p>
-    );
-  }
+  if (documents.length === 0) return null;
 
   return (
-    <div className="mt-4">
-      <h3 className="text-xs font-medium text-ink-2">
-        In this session ({documents.length})
-      </h3>
+    <section className="mt-5 rounded-md border border-accent-line bg-accent-soft/60 p-2.5" aria-label="Session documents">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold text-ink">
+          This session <span className="tnum font-normal text-muted">{documents.length}</span>
+        </h3>
+        <button
+          type="button"
+          onClick={() => run("*", deleteSession)}
+          disabled={removing !== null}
+          className="text-xs text-accent-strong hover:underline disabled:opacity-40"
+        >
+          {removing === "*" ? "Clearing" : "Clear all"}
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-2">
+        Questions are answered from these documents only, not the corpus.
+      </p>
 
-      <ul className="mt-2 divide-y divide-line border-y border-line">
+      <ul className="mt-2 space-y-px">
         {documents.map((document) => (
-          <li key={document.source_doc} className="flex items-center gap-2 py-1.5 text-sm">
-            <div className="min-w-0">
-              <button
-                type="button"
-                onClick={() => openViewer({ sourceDoc: document.source_doc })}
-                title={`Open ${document.source_doc}`}
-                className="block max-w-full truncate text-left text-ink underline decoration-line-strong hover:decoration-ink"
-              >
-                {document.source_doc}
-              </button>
-              <p className="tnum text-xs text-muted">
-                {document.chunk_count} passage
-                {document.chunk_count === 1 ? "" : "s"}
-                {document.pages !== null && `, ${document.pages} pages`}
-              </p>
-            </div>
+          <li
+            key={document.source_doc}
+            className={`group flex items-center gap-1 rounded ${activeDoc === document.source_doc ? "bg-raised" : "hover:bg-raised"}`}
+          >
             <button
               type="button"
-              onClick={() => handleRemove(document.source_doc)}
-              disabled={removing !== null}
-              aria-label={`Remove ${document.source_doc}`}
-              className="ml-auto shrink-0 text-xs text-ink-2 underline decoration-line-strong hover:text-ink disabled:opacity-40"
+              onClick={() => openViewer({ sourceDoc: document.source_doc })}
+              title={`Open ${document.source_doc}`}
+              className="min-w-0 flex-1 px-1.5 py-1 text-left"
             >
-              {removing === document.source_doc ? "Removing" : "Remove"}
+              <span className={`block truncate text-[13px] ${activeDoc === document.source_doc ? "font-medium text-accent-strong" : "text-ink"}`}>
+                {document.source_doc}
+              </span>
+              <span className="tnum block text-[11px] text-muted">
+                {document.chunk_count} passage{document.chunk_count === 1 ? "" : "s"}
+                {document.pages !== null && ` · ${document.pages} pages`}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => run(document.source_doc, () => deleteSessionDocument(document.source_doc))}
+              disabled={removing !== null}
+              aria-label={`Remove ${document.source_doc} from this session`}
+              title="Remove from session"
+              className="mr-1 shrink-0 rounded p-1 text-muted opacity-0 hover:bg-sunken hover:text-ink focus-visible:opacity-100 disabled:opacity-40 group-hover:opacity-100"
+            >
+              {removing === document.source_doc ? (
+                <span className="block size-3.5 animate-pulse rounded-full bg-line-strong" />
+              ) : (
+                <Close width="14" height="14" />
+              )}
             </button>
           </li>
         ))}
       </ul>
-    </div>
+
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-bad">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }

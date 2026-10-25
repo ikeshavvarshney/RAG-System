@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Chevron, Close } from "@/components/Icons";
+import { Chevron, Close, Doc } from "@/components/Icons";
 import {
   METHOD_LABELS,
   PASSAGE_LABELS,
@@ -14,8 +14,14 @@ import {
 
 export const ViewerContext = createContext<(target: ViewerTarget) => void>(() => undefined);
 
+export const ActiveViewerContext = createContext<ViewerTarget | null>(null);
+
 export function useOpenViewer() {
   return useContext(ViewerContext);
+}
+
+export function useActiveViewer() {
+  return useContext(ActiveViewerContext);
 }
 
 type Tab = "page" | "text";
@@ -63,9 +69,7 @@ function PageImage({ src, alt }: { src: string; alt: string }) {
   return (
     <div className="relative min-h-40">
       {state === "loading" && (
-        <p className="absolute inset-x-0 top-10 text-center text-xs text-muted" role="status">
-          Rendering page
-        </p>
+        <div className="skeleton absolute inset-x-0 top-0 mx-auto aspect-[1/1.3] w-full max-w-3xl" role="status" aria-label="Rendering page" />
       )}
       {/* eslint-disable-next-line @next/next/no-img-element -- rendered by the backend per request */}
       <img
@@ -73,7 +77,7 @@ function PageImage({ src, alt }: { src: string; alt: string }) {
         alt={alt}
         onLoad={() => setState("ready")}
         onError={() => setState("failed")}
-        className={`mx-auto block w-full max-w-3xl border border-line bg-white shadow-[0_2px_10px_rgb(11_11_11/0.07)] transition-opacity duration-300 ${
+        className={`mx-auto block w-full max-w-3xl rounded-sm border border-line bg-white shadow-[0_2px_10px_rgb(16_19_24/0.08)] transition-opacity duration-200 ${
           state === "ready" ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -125,22 +129,28 @@ export default function DocumentViewer({ target, onClose }: { target: ViewerTarg
 
   const citedHere = target.chunkId && (target.page ?? 1) === current ? target.chunkId : undefined;
   const tabClass = (value: Tab) =>
-    `rounded-md px-2.5 py-1 text-xs transition-colors ${
+    `rounded-[5px] px-2.5 py-0.5 text-xs transition-colors ${
       tab === value
-        ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(11_11_11/0.08)]"
-        : "text-ink-2 hover:text-ink"
+        ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(16_19_24/0.08)]"
+        : "text-muted hover:text-ink"
     }`;
 
   return (
     <aside
       aria-label={`Document viewer: ${target.sourceDoc}`}
-      className="fixed inset-0 top-14 z-30 flex flex-col bg-page xl:static xl:z-auto xl:w-[44%] xl:min-w-[26rem] xl:max-w-3xl xl:shrink-0 xl:border-l xl:border-line"
+      className="fixed inset-0 top-12 z-30 flex flex-col bg-sunken xl:static xl:z-auto xl:w-[44%] xl:min-w-[26rem] xl:max-w-3xl xl:shrink-0 xl:border-l xl:border-line"
     >
-      <header className="shrink-0 border-b border-line bg-surface px-4 py-2.5">
+      <header className="shrink-0 border-b border-line bg-raised px-4 py-2">
         <div className="flex items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-medium" title={target.sourceDoc}>
+          <Doc className="shrink-0 text-series-corpus" width="15" height="15" />
+          <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={target.sourceDoc}>
             {target.sourceDoc}
           </h2>
+          {doc && (
+            <span className="tnum hidden shrink-0 text-xs text-muted sm:inline">
+              {doc.passages.length} passage{doc.passages.length === 1 ? "" : "s"}
+            </span>
+          )}
           <button
             ref={closeRef}
             type="button"
@@ -155,7 +165,7 @@ export default function DocumentViewer({ target, onClose }: { target: ViewerTarg
         {doc && (
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             {pageCount > 0 && (
-              <div className="flex gap-1 rounded-lg bg-sunken p-0.5" role="tablist">
+              <div className="flex gap-0.5 rounded-md border border-line bg-sunken p-0.5" role="tablist">
                 <button type="button" role="tab" aria-selected={tab === "page"} onClick={() => setTab("page")} className={tabClass("page")}>
                   Page
                 </button>
@@ -200,7 +210,11 @@ export default function DocumentViewer({ target, onClose }: { target: ViewerTarg
             {error}
           </p>
         )}
-        {!error && !doc && <p className="text-sm text-muted">Opening document</p>}
+        {!error && !doc && (
+          <div className="mx-auto max-w-3xl" role="status" aria-label="Opening document">
+            <div className="skeleton aspect-[1/1.3] w-full" />
+          </div>
+        )}
 
         {doc && tab === "page" && pageCount > 0 && (
           <PageImage

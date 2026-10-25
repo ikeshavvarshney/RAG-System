@@ -102,6 +102,10 @@ class HistoryStore:
             self._sessions.move_to_end(session_id)
             return list(session.turns)
 
+    def clear(self, session_id: str) -> bool:
+        with self._lock:
+            return self._sessions.pop(session_id, None) is not None
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._sessions)
@@ -124,6 +128,10 @@ def record_turn(
     answer_summary: str | None = None,
 ) -> None:
     _store.record_turn(session_id, raw_question, resolved_question, answer_summary)
+
+
+def clear_session(session_id: str) -> bool:
+    return _store.clear(session_id)
 
 
 def summarize_answer(answer: str) -> str:

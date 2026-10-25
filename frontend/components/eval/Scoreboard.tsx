@@ -22,14 +22,14 @@ export function MetricBars({ run, scores, scoredCount, comparison }: Props) {
   return (
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="font-serif text-2xl font-medium tracking-tight">Scores</h2>
+        <h2 className="text-lg font-semibold tracking-tight">Scores</h2>
         <p className="tnum text-xs text-muted">
           Mean over {scoredCount} scored question{scoredCount === 1 ? "" : "s"}, 0 to 1, higher is
           better
         </p>
       </div>
 
-      <ul className="mt-4 border-t border-line">
+      <ul className="mt-3 overflow-hidden rounded-lg border border-line bg-raised">
         {METRICS.map((metric, index) => {
           const value = scores[metric.key];
           const delta =
@@ -39,7 +39,7 @@ export function MetricBars({ run, scores, scoredCount, comparison }: Props) {
               ? (comparison.baseScores[metric.key] as number) - (comparison.scores[metric.key] as number)
               : null;
           return (
-            <li key={metric.key} className="border-b border-line py-4">
+            <li key={metric.key} className="border-b border-line px-4 py-3.5 last:border-b-0">
               <div className="flex items-baseline gap-3">
                 <h3 className="text-sm font-medium">{metric.label}</h3>
                 {delta !== null && (
@@ -52,16 +52,16 @@ export function MetricBars({ run, scores, scoredCount, comparison }: Props) {
                     {formatDelta(delta)}
                   </span>
                 )}
-                <span className="tnum ml-auto font-mono text-xl font-medium">{formatScore(value)}</span>
+                <span className="tnum ml-auto font-mono text-lg font-medium">{formatScore(value)}</span>
               </div>
               <div
-                className="mt-2 h-2 overflow-hidden rounded-sm bg-sunken"
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-sunken"
                 role="img"
                 aria-label={`${metric.label}: ${formatScore(value)} out of 1`}
               >
                 {typeof value === "number" && (
                   <div
-                    className="h-full origin-left animate-grow rounded-r-sm bg-accent"
+                    className="h-full origin-left animate-grow rounded-full bg-accent"
                     style={{ width: `${value * 100}%`, animationDelay: `${index * 70}ms` }}
                   />
                 )}
@@ -87,7 +87,7 @@ export function SourceSplit({ counts, total }: { counts: Record<AnswerSource, nu
   const present = SOURCES.filter((source) => counts[source.key] > 0);
   return (
     <div>
-      <h3 className="text-sm font-medium">Where answers came from</h3>
+      <h3 className="text-xs font-semibold">Where answers came from</h3>
       <div
         className="mt-3 flex h-3 gap-0.5"
         role="img"
@@ -138,9 +138,9 @@ export function RunFacts({ run }: { run: RunDetail }) {
   }
 
   return (
-    <dl className="border-t border-line">
+    <dl>
       {facts.map(([term, detail]) => (
-        <div key={term} className="flex items-baseline justify-between gap-4 border-b border-line py-2 text-xs">
+        <div key={term} className="flex items-baseline justify-between gap-4 border-t border-line py-2 text-xs first:border-t-0 first:pt-0">
           <dt className="text-muted">{term}</dt>
           <dd className="tnum truncate text-right font-mono text-ink" title={detail}>
             {detail}

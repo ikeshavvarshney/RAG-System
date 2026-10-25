@@ -29,20 +29,20 @@ export default function HowItWorks({ reference }: { reference: ReferenceSummary 
 
   return (
     <div className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_20rem]">
-      <ol className="border-t border-line">
+      <ol className="overflow-hidden rounded-lg border border-line bg-raised">
         {STEPS.map((step, index) => (
-          <li key={step.title} className="grid grid-cols-[1.5rem_1fr] gap-x-3 border-b border-line py-4">
-            <span className="tnum pt-0.5 font-mono text-xs text-muted">{index + 1}</span>
+          <li key={step.title} className="grid grid-cols-[1.75rem_1fr] gap-x-3 border-b border-line px-4 py-3.5 last:border-b-0">
+            <span className="tnum flex size-5 items-center justify-center rounded bg-sunken font-mono text-[11px] text-ink-2">{index + 1}</span>
             <div>
-              <h3 className="text-sm font-medium">{step.title}</h3>
+              <h3 className="text-sm font-semibold">{step.title}</h3>
               <p className="mt-1 max-w-[68ch] text-sm leading-relaxed text-ink-2">{step.body}</p>
             </div>
           </li>
         ))}
       </ol>
 
-      <div>
-        <h3 className="text-sm font-medium">The reference set</h3>
+      <div className="h-fit rounded-lg border border-line bg-raised p-4">
+        <h3 className="text-sm font-semibold">The reference set</h3>
         {reference ? (
           <>
             <p className="mt-1 text-xs leading-relaxed text-ink-2">
@@ -56,9 +56,9 @@ export default function HowItWorks({ reference }: { reference: ReferenceSummary 
                     <span className="text-ink-2">{categoryLabel(category)}</span>
                     <span className="tnum font-mono text-ink">{count}</span>
                   </div>
-                  <div className="mt-1 h-1.5 rounded-sm bg-sunken">
+                  <div className="mt-1 h-1.5 rounded-full bg-sunken">
                     <div
-                      className="h-full rounded-r-sm bg-accent"
+                      className="h-full rounded-full bg-accent"
                       style={{ width: `${(count / largest) * 100}%` }}
                     />
                   </div>

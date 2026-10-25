@@ -2,11 +2,9 @@
 
 import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { Close, Upload } from "@/components/Icons";
-import SessionDocuments from "@/components/SessionDocuments";
 import {
   ACCEPTED_EXTENSIONS,
   MAX_FILES_PER_REQUEST,
-  deleteSession,
   formatBytes,
   getSessionId,
   ingestFiles,
@@ -30,12 +28,12 @@ const TARGETS: { value: IngestTarget; label: string; hint: string }[] = [
   {
     value: "corpus",
     label: "Corpus",
-    hint: "Stored permanently and shared by everyone using this system.",
+    hint: "Stored permanently and searched by everyone using this system.",
   },
   {
     value: "session",
     label: "This session",
-    hint: "Kept in a separate store, never mixed into the corpus, and discarded when the session ends.",
+    hint: "Private to this browser. While the session holds documents, questions are answered from them alone.",
   },
 ];
 
@@ -45,8 +43,6 @@ export default function FileUpload({ onIngested }: Props) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [dragging, setDragging] = useState(false);
   const [target, setTarget] = useState<IngestTarget>("corpus");
-  const [clearing, setClearing] = useState(false);
-  const [refreshToken, setRefreshToken] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const busy = phase.kind === "uploading" || phase.kind === "processing";
@@ -61,7 +57,7 @@ export default function FileUpload({ onIngested }: Props) {
       const reason = rejectionReason(file);
       if (reason) {
         refused.push({ name: file.name, reason });
-      } else if (!queue.some((q) => q.name === file.name && q.size === file.size)) {
+      } else if (![...queue, ...accepted].some((q) => q.name === file.name && q.size === file.size)) {
         accepted.push(file);
       }
     }
@@ -112,7 +108,6 @@ export default function FileUpload({ onIngested }: Props) {
       setQueue([]);
       setRejected([]);
       setPhase({ kind: "done", result });
-      setRefreshToken((token) => token + 1);
       onIngested?.(result);
     } catch (error) {
       setPhase({
@@ -122,36 +117,20 @@ export default function FileUpload({ onIngested }: Props) {
     }
   }
 
-  async function handleClearSession() {
-    setClearing(true);
-    try {
-      await deleteSession();
-      setPhase({ kind: "idle" });
-      setRefreshToken((token) => token + 1);
-    } catch (error) {
-      setPhase({
-        kind: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setClearing(false);
-    }
-  }
-
   const activeTarget = TARGETS.find((option) => option.value === target)!;
 
   return (
     <div>
       <fieldset disabled={busy}>
-        <legend className="text-xs font-medium text-ink-2">Add to</legend>
-        <div className="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-sunken p-1">
+        <legend className="text-xs font-medium text-ink-2">Upload to</legend>
+        <div className="mt-1.5 grid grid-cols-2 gap-0.5 rounded-md border border-line bg-sunken p-0.5">
           {TARGETS.map((option) => (
             <label
               key={option.value}
-              className={`cursor-pointer rounded-md px-2 py-1.5 text-center text-sm transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${
+              className={`cursor-pointer rounded-[5px] px-2 py-1 text-center text-[13px] transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${
                 target === option.value
-                  ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(11_11_11/0.08)]"
-                  : "text-ink-2 hover:text-ink"
+                  ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(16_19_24/0.08)]"
+                  : "text-muted hover:text-ink"
               }`}
             >
               <input
@@ -166,34 +145,36 @@ export default function FileUpload({ onIngested }: Props) {
             </label>
           ))}
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-muted">{activeTarget.hint}</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted">{activeTarget.hint}</p>
       </fieldset>
 
       <div
+        role="button"
+        tabIndex={busy ? -1 : 0}
+        aria-disabled={busy}
+        onClick={() => !busy && inputRef.current?.click()}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === " ") && !busy) {
+            event.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           if (!busy) setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
-        className={`mt-4 rounded-lg border border-dashed px-4 py-6 text-center transition-colors ${
-          dragging ? "border-accent bg-accent-soft" : "border-line-strong bg-surface"
+        className={`mt-3 flex cursor-pointer flex-col items-center rounded-md border border-dashed px-3 py-4 text-center transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60 ${
+          dragging ? "border-accent bg-accent-soft" : "border-line-strong bg-raised hover:border-ink-2"
         }`}
       >
-        <Upload className="mx-auto mb-2 text-muted" width="18" height="18" />
-        <p className="text-sm text-ink-2">
-          Drop documents here, or{" "}
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            disabled={busy}
-            className="font-medium text-accent-strong underline hover:text-ink disabled:opacity-40"
-          >
-            choose files
-          </button>
+        <Upload className="text-muted" width="18" height="18" />
+        <p className="mt-1.5 text-[13px] text-ink">
+          Drop files or <span className="font-medium text-accent">browse</span>
         </p>
-        <p className="mt-1 text-xs text-muted">
-          PDF, DOCX, JPG, PNG. Up to {MAX_FILES_PER_REQUEST} files, 50 MB each.
+        <p className="mt-0.5 text-[11px] text-muted">
+          PDF, DOCX, JPG, PNG · up to {MAX_FILES_PER_REQUEST} files, 50 MB each
         </p>
         <input
           ref={inputRef}
@@ -206,11 +187,11 @@ export default function FileUpload({ onIngested }: Props) {
       </div>
 
       {queue.length > 0 && (
-        <ul className="mt-3 divide-y divide-line border-y border-line">
+        <ul className="mt-2 divide-y divide-line rounded-md border border-line bg-raised">
           {queue.map((file, index) => (
-            <li key={`${file.name}-${file.size}`} className="flex items-center gap-2 py-1.5 text-sm">
-              <span className="truncate text-ink">{file.name}</span>
-              <span className="tnum shrink-0 text-xs text-muted">{formatBytes(file.size)}</span>
+            <li key={`${file.name}-${file.size}`} className="flex items-center gap-2 py-1 pl-2.5 pr-1 text-[13px]">
+              <span className="min-w-0 truncate text-ink" title={file.name}>{file.name}</span>
+              <span className="tnum shrink-0 font-mono text-[11px] text-muted">{formatBytes(file.size)}</span>
               <button
                 type="button"
                 onClick={() => removeAt(index)}
@@ -226,7 +207,7 @@ export default function FileUpload({ onIngested }: Props) {
       )}
 
       {rejected.length > 0 && (
-        <ul className="mt-3 space-y-1">
+        <ul className="mt-2 space-y-0.5">
           {rejected.map((item) => (
             <li key={item.name} className="text-xs text-bad">
               {item.name}: {item.reason}
@@ -236,43 +217,36 @@ export default function FileUpload({ onIngested }: Props) {
       )}
 
       {queue.length > 0 && (
-        <button
-          type="button"
-          onClick={handleUpload}
-          disabled={busy}
-          className="mt-3 w-full rounded-md bg-ink px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-ink/85 disabled:opacity-40"
-        >
-          {busy
-            ? "Working"
-            : `Ingest ${queue.length} file${queue.length === 1 ? "" : "s"} into ${
-                target === "corpus" ? "the corpus" : "this session"
-              }`}
-        </button>
-      )}
-
-      <Status phase={phase} />
-
-      {target === "session" && (
-        <>
-          <SessionDocuments
-            refreshToken={refreshToken}
-            onChanged={() => setPhase({ kind: "idle" })}
-          />
+        <div className="mt-2 flex gap-2">
           <button
             type="button"
-            onClick={handleClearSession}
-            disabled={busy || clearing}
-            className="mt-3 text-xs text-ink-2 underline decoration-line-strong hover:text-ink disabled:opacity-40"
+            onClick={handleUpload}
+            disabled={busy}
+            className="flex-1 rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-strong disabled:opacity-50"
           >
-            {clearing ? "Clearing" : "Clear session uploads"}
+            {busy ? "Ingesting" : `Ingest ${queue.length} file${queue.length === 1 ? "" : "s"}`}
           </button>
-        </>
+          {!busy && (
+            <button
+              type="button"
+              onClick={() => {
+                setQueue([]);
+                setRejected([]);
+              }}
+              className="rounded-md border border-line-strong bg-raised px-3 py-1.5 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       )}
+
+      <Status phase={phase} onDismiss={() => setPhase({ kind: "idle" })} />
     </div>
   );
 }
 
-function Status({ phase }: { phase: Phase }) {
+function Status({ phase, onDismiss }: { phase: Phase; onDismiss: () => void }) {
   if (phase.kind === "idle") return null;
 
   if (phase.kind === "uploading") {
@@ -292,52 +266,64 @@ function Status({ phase }: { phase: Phase }) {
 
   if (phase.kind === "processing") {
     return (
-      <p className="mt-3 flex gap-2 text-xs leading-relaxed text-ink-2" role="status">
-        <span className="mt-1.5 size-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
-        Extracting and indexing. Figures each cost a vision call, so this can
-        take a few minutes.
-      </p>
+      <div className="mt-3" role="status">
+        <p className="text-xs text-ink-2">Extracting and indexing</p>
+        <div className="skeleton mt-1 h-1 w-full" />
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+          Each figure costs a vision call, so a large batch takes a few minutes.
+        </p>
+      </div>
     );
   }
 
-  if (phase.kind === "error") {
-    return (
-      <p role="alert" className="mt-3 text-xs text-bad">
-        {phase.message}
-      </p>
-    );
-  }
-
-  const { result } = phase;
-  const methods = Object.entries(result.indexed.by_extraction_method).filter(
-    ([, count]) => count > 0,
-  );
+  const tone =
+    phase.kind === "error" ? "border-bad/25 bg-bad-soft text-bad" : "border-good/20 bg-good-soft text-ink";
 
   return (
-    <div className="mt-3 text-xs leading-relaxed">
-      <p className="text-ink">
-        Indexed {result.indexed.total} passage
+    <div role={phase.kind === "error" ? "alert" : "status"} className={`mt-3 flex gap-2 rounded-md border px-2.5 py-2 text-xs leading-relaxed ${tone}`}>
+      <div className="min-w-0 flex-1">
+        {phase.kind === "error" ? (
+          phase.message
+        ) : (
+          <DoneSummary result={phase.result} />
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="-m-0.5 h-fit shrink-0 rounded p-0.5 opacity-60 hover:opacity-100"
+      >
+        <Close width="13" height="13" />
+      </button>
+    </div>
+  );
+}
+
+function DoneSummary({ result }: { result: IngestResponse }) {
+  const methods = Object.entries(result.indexed.by_extraction_method).filter(([, count]) => count > 0);
+  return (
+    <>
+      <p>
+        Indexed <span className="tnum font-medium">{result.indexed.total}</span> passage
         {result.indexed.total === 1 ? "" : "s"} from {result.succeeded.length} document
         {result.succeeded.length === 1 ? "" : "s"} into{" "}
-        {result.corpus_scope === "persistent" ? "the corpus" : "this session"}
-        {methods.length > 0 && (
-          <span className="text-muted">
-            {" "}
-            ({methods.map(([name, count]) => `${count} ${name}`).join(", ")})
-          </span>
-        )}
-        .
+        {result.corpus_scope === "persistent" ? "the corpus" : "this session"}.
       </p>
-
+      {methods.length > 0 && (
+        <p className="tnum mt-0.5 text-muted">
+          {methods.map(([name, count]) => `${count} ${name}`).join(" · ")}
+        </p>
+      )}
       {result.failed.length > 0 && (
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-1.5 space-y-0.5 text-bad">
           {result.failed.map((failure) => (
-            <li key={failure.filename} className="text-bad">
+            <li key={failure.filename}>
               {failure.filename}: {failure.reason}
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }

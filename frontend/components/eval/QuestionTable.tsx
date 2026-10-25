@@ -22,7 +22,25 @@ const SHORT: Record<MetricKey, string> = {
 
 function tint(value: number | null): string | undefined {
   if (typeof value !== "number") return undefined;
-  return `rgb(37 106 191 / ${(0.04 + value * 0.26).toFixed(3)})`;
+  return `rgb(29 91 214 / ${(0.02 + value * 0.13).toFixed(3)})`;
+}
+
+function ScoreGrid({ scores }: { scores: Record<MetricKey, number | null> }) {
+  return (
+    <dl className="mt-2 grid grid-cols-4 gap-px overflow-hidden rounded border border-line bg-line">
+      {METRICS.map((metric) => {
+        const value = scores[metric.key];
+        return (
+          <div key={metric.key} className="bg-raised px-1.5 py-1" style={{ backgroundColor: tint(value) }}>
+            <dt className="text-[10px] text-muted">{SHORT[metric.key]}</dt>
+            <dd className="tnum font-mono text-xs">
+              {typeof value === "number" ? value.toFixed(2) : <span className="text-muted">n/a</span>}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
 }
 
 function ScoreCell({ value }: { value: number | null }) {
@@ -49,11 +67,25 @@ export function CategoryTable({ questions }: { questions: EvalQuestion[] }) {
   }, [questions]);
 
   return (
-    <div className="overflow-x-auto">
+    <>
+    <ul className="space-y-2 sm:hidden">
+      {rows.map((row) => (
+        <li key={row.category} className="rounded-lg border border-line bg-raised p-3">
+          <p className="flex items-baseline justify-between gap-2 text-sm">
+            {categoryLabel(row.category)}
+            <span className="tnum font-mono text-xs text-muted">
+              {row.scored} of {row.count}
+            </span>
+          </p>
+          <ScoreGrid scores={row.scores} />
+        </li>
+      ))}
+    </ul>
+    <div className="hidden overflow-x-auto rounded-lg border border-line bg-raised sm:block">
       <table className="w-full min-w-[34rem] border-collapse text-sm">
         <thead>
-          <tr className="border-b border-line-strong text-left text-xs text-muted">
-            <th className="py-2 pr-3 font-normal">Category</th>
+          <tr className="border-b border-line-strong text-left text-xs text-muted bg-surface">
+            <th className="py-2 pl-4 pr-3 font-medium">Category</th>
             <th className="px-2 py-2 text-right font-normal">Scored</th>
             {METRICS.map((metric) => (
               <th key={metric.key} className="px-2 py-2 text-right font-normal" title={metric.about}>
@@ -64,8 +96,8 @@ export function CategoryTable({ questions }: { questions: EvalQuestion[] }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.category} className="border-b border-line">
-              <th className="py-2 pr-3 text-left font-normal">{categoryLabel(row.category)}</th>
+            <tr key={row.category} className="border-b border-line last:border-b-0">
+              <th className="py-2 pl-4 pr-3 text-left font-normal">{categoryLabel(row.category)}</th>
               <td className="tnum px-2 py-2 text-right font-mono text-xs text-ink-2">
                 {row.scored} of {row.count}
               </td>
@@ -77,6 +109,7 @@ export function CategoryTable({ questions }: { questions: EvalQuestion[] }) {
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
@@ -104,7 +137,7 @@ export default function QuestionTable({ questions }: { questions: EvalQuestion[]
   }, [questions, category, source, sort]);
 
   const select =
-    "rounded-md border border-line-strong bg-raised px-2 py-1 text-xs text-ink hover:border-ink";
+    "rounded-md border border-line-strong bg-raised px-2 py-1 text-xs text-ink outline-none hover:border-ink-2 focus:border-accent";
 
   return (
     <div>
@@ -147,11 +180,56 @@ export default function QuestionTable({ questions }: { questions: EvalQuestion[]
         </span>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
+      <ul className="mt-3 space-y-2 sm:hidden">
+        {visible.length === 0 && <li className="py-4 text-center text-xs text-muted">No questions match these filters.</li>}
+        {visible.map((question) => {
+          const expanded = open === question.id;
+          const sourceMeta = SOURCES.find((option) => option.key === question.answer_source);
+          return (
+            <li key={question.id} className="rounded-lg border border-line bg-raised">
+              <button
+                type="button"
+                onClick={() => setOpen(expanded ? null : question.id)}
+                aria-expanded={expanded}
+                className="block w-full p-3 text-left"
+              >
+                <p className={`text-sm ${expanded ? "" : "line-clamp-2"}`}>
+                  <span className="tnum mr-1.5 font-mono text-xs text-muted">{question.id}</span>
+                  {question.question}
+                </p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+                  {sourceMeta && <span className={`size-2 rounded-xs ${sourceMeta.swatch}`} />}
+                  {sourceMeta?.label ?? "n/a"} · {categoryLabel(question.category)}
+                </p>
+                <ScoreGrid scores={question.scores} />
+              </button>
+              {expanded && (
+                <div className="space-y-3 border-t border-line p-3 text-sm leading-relaxed">
+                  <div>
+                    <h4 className="text-xs font-medium text-muted">System answer</h4>
+                    <p className="mt-1 whitespace-pre-wrap">{question.answer || "No answer was produced."}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-medium text-muted">Reference answer</h4>
+                    <p className="mt-1 whitespace-pre-wrap text-ink-2">{question.reference_answer || "None recorded."}</p>
+                  </div>
+                  {(question.error || question.failures.length > 0) && (
+                    <p role="alert" className="text-xs text-bad">
+                      {[question.error, ...question.failures].filter(Boolean).join(" ")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="mt-3 hidden overflow-x-auto rounded-lg border border-line bg-raised sm:block">
         <table className="w-full min-w-[44rem] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-line-strong text-left text-xs text-muted">
-              <th className="w-6 py-2 font-normal">
+            <tr className="border-b border-line-strong text-left text-xs text-muted bg-surface">
+              <th className="w-9 py-2 pl-3 font-normal">
                 <span className="sr-only">Expand</span>
               </th>
               <th className="py-2 pr-3 font-normal">Question</th>
@@ -176,8 +254,11 @@ export default function QuestionTable({ questions }: { questions: EvalQuestion[]
               const sourceMeta = SOURCES.find((option) => option.key === question.answer_source);
               return (
                 <Fragment key={question.id}>
-                  <tr className="border-b border-line align-top hover:bg-surface">
-                    <td className="py-2">
+                  <tr
+                    onClick={() => setOpen(expanded ? null : question.id)}
+                    className={`cursor-pointer border-b border-line align-top hover:bg-surface ${expanded ? "bg-surface" : ""}`}
+                  >
+                    <td className="py-2 pl-3" onClick={(event) => event.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => setOpen(expanded ? null : question.id)}

@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.api.schemas import ERRORS, IngestResponse, SessionResponse
 from app.chains import ingestion_chain
 from app.ingestion.pipeline import FileError
-from app.query import cache
+from app.query import cache, history
 from app.shared import document_files
 from app.shared.session_store import (
     PERSISTENT_SCOPE,
@@ -201,9 +201,19 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     invalidated = cache.invalidate_scope(scope_for(session_id))
+    history.clear_session(session_id)
 
     return {
         "session_id": session_id,
         "deleted": removed,
         "invalidated_cache_entries": invalidated,
     }
+
+@router.delete("/session/{session_id}/history")
+async def clear_session_history(session_id: str):
+    """Forget a session's conversation turns, so the next question is not rewritten against them."""
+    try:
+        validate_issued_session_id(session_id)
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"session_id": session_id, "cleared": history.clear_session(session_id)}

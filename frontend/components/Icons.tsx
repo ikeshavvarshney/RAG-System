@@ -61,7 +61,7 @@ export const Doc = (props: Props) => (
 export const Globe = (props: Props) => (
   <Icon {...props}>
     <circle cx="10" cy="10" r="7" />
-    <path d="M3 10h14M10 3c2.2 2 3.2 4.3 3.2 7S12.2 15 10 17c-2.2-2-3.2-4.3-3.2-7S7.800 5 10 3z" />
+    <path d="M3 10h14M10 3c2.2 2 3.2 4.3 3.2 7S12.2 15 10 17c-2.2-2-3.2-4.3-3.2-7S7.8 5 10 3z" />
   </Icon>
 );
 
@@ -87,5 +87,36 @@ export const Close = (props: Props) => (
 export const Play = (props: Props) => (
   <Icon {...props}>
     <path d="M7 4.5v11l9-5.5-9-5.5z" />
+  </Icon>
+);
+
+export const Plus = (props: Props) => (
+  <Icon {...props}>
+    <path d="M10 4v12M4 10h12" />
+  </Icon>
+);
+
+export const Trash = (props: Props) => (
+  <Icon {...props}>
+    <path d="M4 6h12M8 6V4.5h4V6M6 6l.7 9.6a1.5 1.5 0 0 0 1.5 1.4h3.6a1.5 1.5 0 0 0 1.5-1.4L14 6" />
+  </Icon>
+);
+
+export const Retry = (props: Props) => (
+  <Icon {...props}>
+    <path d="M15.5 9.5A5.5 5.5 0 1 1 13.9 5.6M16 3.5v3.5h-3.5" />
+  </Icon>
+);
+
+export const Search = (props: Props) => (
+  <Icon {...props}>
+    <circle cx="9" cy="9" r="5" />
+    <path d="M13 13l3.5 3.5" />
+  </Icon>
+);
+
+export const External = (props: Props) => (
+  <Icon {...props}>
+    <path d="M11 4h5v5M16 4l-7 7M14 12v3.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3.5" />
   </Icon>
 );

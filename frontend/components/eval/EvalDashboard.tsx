@@ -5,6 +5,7 @@ import HowItWorks from "@/components/eval/HowItWorks";
 import QuestionTable, { CategoryTable } from "@/components/eval/QuestionTable";
 import RunPanel from "@/components/eval/RunPanel";
 import { MetricBars, RunFacts, SourceSplit } from "@/components/eval/Scoreboard";
+import { API_BASE_URL } from "@/lib/api";
 import {
   METRICS,
   averageScores,
@@ -35,8 +36,8 @@ function when(seconds: number): string {
 
 function Section({ id, title, lead, children }: { id: string; title: string; lead?: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="mt-16 scroll-mt-6">
-      <h2 className="font-serif text-2xl font-medium tracking-tight">{title}</h2>
+    <section id={id} className="mt-14 scroll-mt-6">
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
       {lead && <p className="mt-2 max-w-[68ch] text-sm leading-relaxed text-ink-2">{lead}</p>}
       <div className="mt-5">{children}</div>
     </section>
@@ -111,7 +112,9 @@ export default function EvalDashboard() {
     let active = true;
     fetchRun(selected)
       .then((detail) => {
-        if (active) setRun(detail);
+        if (!active) return;
+        setRun(detail);
+        setError(null);
       })
       .catch((caught: unknown) => {
         if (active) setError(caught instanceof Error ? caught.message : String(caught));
@@ -167,15 +170,21 @@ export default function EvalDashboard() {
   }, [current, baseline]);
 
   const select =
-    "rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-sm text-ink hover:border-ink";
+    "rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-[13px] text-ink outline-none hover:border-ink-2 focus:border-accent";
+
+  function chooseRun(name: string) {
+    setSelected(name);
+    setError(null);
+    if (name === compareTo) setCompareTo("");
+  }
   const summary = runs?.find((item) => item.name === selected);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-24 pt-10 sm:px-6 sm:pt-14">
+    <div className="mx-auto max-w-6xl px-4 pb-20 pt-10 sm:px-6 sm:pt-12">
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
         <div className="max-w-2xl">
-          <h1 className="font-serif text-4xl font-medium tracking-tight">Evaluation</h1>
-          <p className="mt-3 text-sm leading-relaxed text-ink-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Evaluation</h1>
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">
             How well the system answers a fixed set of questions with known answers, scored with
             RAGAS by a separate judge model.
           </p>
@@ -183,11 +192,11 @@ export default function EvalDashboard() {
 
         {runs && runs.length > 0 && (
           <div className="flex flex-wrap items-end gap-3">
-            <label className="text-xs text-ink-2">
+            <label className="text-xs font-medium text-ink-2">
               Run
               <select
                 value={selected ?? ""}
-                onChange={(event) => setSelected(event.target.value)}
+                onChange={(event) => chooseRun(event.target.value)}
                 className={`${select} mt-1 block font-mono`}
               >
                 {runs.map((item) => (
@@ -199,7 +208,7 @@ export default function EvalDashboard() {
               </select>
             </label>
             {runs.length > 1 && (
-              <label className="text-xs text-ink-2">
+              <label className="text-xs font-medium text-ink-2">
                 Compare with
                 <select
                   value={compareTo}
@@ -231,17 +240,18 @@ export default function EvalDashboard() {
         <p className="mt-12 flex max-w-xl gap-2.5 text-sm leading-relaxed text-ink-2" role="status">
           {waiting && <span className="mt-2 size-1.5 shrink-0 animate-pulse rounded-full bg-warn" />}
           {waiting
-            ? "Waiting for the backend at localhost:8000. It can take a minute to start, and this page keeps checking on its own."
+            ? `Waiting for the backend at ${API_BASE_URL}. It can take a minute to start, and this page keeps checking on its own.`
             : "Loading runs"}
         </p>
       )}
 
       {runs !== null && runs.length === 0 && (
-        <div className="mt-12 max-w-xl border-l border-line-strong pl-4">
-          <h2 className="font-serif text-xl font-medium tracking-tight">No evaluation has been run yet</h2>
+        <div className="mt-10 max-w-xl rounded-lg border border-dashed border-line-strong bg-raised px-5 py-4">
+          <h2 className="text-base font-semibold">No evaluation has been run yet</h2>
           <p className="mt-2 text-sm leading-relaxed text-ink-2">
-            Start with a trial of a few questions below. It takes a couple of minutes per question,
-            and the scores appear here when it finishes.
+            Start with a trial of a few questions{" "}
+            <a href="#run" className="font-medium text-accent hover:underline">below</a>. It takes a
+            couple of minutes per question, and the scores appear here when it finishes.
           </p>
         </div>
       )}
@@ -256,7 +266,7 @@ export default function EvalDashboard() {
             </p>
           )}
 
-          <div className="mt-8 grid gap-x-12 gap-y-10 *:min-w-0 lg:grid-cols-[1fr_20rem]">
+          <div className="mt-6 grid gap-x-10 gap-y-8 *:min-w-0 lg:grid-cols-[1fr_20rem]">
             <MetricBars
               key={current.name}
               run={current}
@@ -264,7 +274,7 @@ export default function EvalDashboard() {
               scoredCount={view.scored}
               comparison={view.comparison}
             />
-            <div className="space-y-8 lg:pt-12">
+            <div className="h-fit space-y-6 rounded-lg border border-line bg-raised p-4 lg:mt-11">
               <SourceSplit counts={view.counts} total={current.questions.length} />
               <RunFacts run={current} />
               {current.split?.low_corpus_coverage && (

@@ -248,6 +248,21 @@ def test_delete_session_endpoint_drops_the_store():
     assert not session_path(session_id).exists()
 
 
+def test_clear_history_endpoint_forgets_conversation_turns():
+    from app.query import history
+
+    session_id = new_session_id()
+    history.record_turn(session_id, "q", "q")
+    client = TestClient(create_app())
+
+    response = client.delete(f"/api/session/{session_id}/history")
+
+    assert response.status_code == 200
+    assert response.json()["cleared"] is True
+    assert history._store.turns(session_id) == []
+    assert client.delete("/api/session/demo1/history").status_code == 400
+
+
 def test_delete_unknown_session_reports_nothing_deleted():
     client = TestClient(create_app())
     response = client.delete(f"/api/session/{new_session_id()}")

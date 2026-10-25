@@ -46,12 +46,13 @@ export function applyStageEvent(rows: StageRow[], event: StageEvent): StageRow[]
 }
 
 function formatMs(ms: number): string {
+  if (ms < 1) return "<1 ms";
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 const MARK = {
   started: <span className="size-1.5 animate-pulse rounded-full bg-accent" />,
-  completed: <span className="size-1.5 rounded-full bg-line-strong" />,
+  completed: <span className="size-1.5 rounded-full bg-good" />,
   failed: <span className="size-1.5 rounded-full bg-bad" />,
 };
 

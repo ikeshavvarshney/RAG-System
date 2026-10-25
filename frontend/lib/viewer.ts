@@ -65,6 +65,15 @@ export async function listCorpusDocuments(): Promise<CorpusDocument[]> {
   return ((await response.json()) as { documents: CorpusDocument[] }).documents;
 }
 
+/** Remove one document from the shared corpus. */
+export async function deleteCorpusDocument(sourceDoc: string): Promise<void> {
+  const response = await apiFetch(`/documents/${encodeURIComponent(sourceDoc)}`, { method: "DELETE" });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(errorMessage(payload) ?? `Could not delete ${sourceDoc}: ${response.status}`);
+  }
+}
+
 export const PASSAGE_LABELS: Record<Passage["chunk_type"], string> = {
   text: "Text",
   table: "Table",

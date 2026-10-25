@@ -73,6 +73,15 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
   const [weight, setWeight] = useState(0.5);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [previousState, setPreviousState] = useState(status.state);
+
+  if (previousState !== status.state) {
+    // A finished run now exists under this name, so offer a fresh one rather than a resume.
+    if (previousState === "running" && status.state === "finished") setName(defaultName());
+    if (status.state !== "running") setStopping(false);
+    setPreviousState(status.state);
+  }
 
   const running = status.state === "running";
   const total = reference?.questions ?? 0;
@@ -115,19 +124,21 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
   }
 
   async function handleStop() {
+    setStopping(true);
     try {
       onStatus(await stopRun());
     } catch (caught) {
+      setStopping(false);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   }
 
   const field =
-    "w-full rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-sm text-ink outline-none transition-colors hover:border-ink focus:border-ink disabled:opacity-50";
+    "w-full rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-sm text-ink outline-none transition-colors hover:border-ink-2 focus:border-accent disabled:opacity-50";
 
   return (
-    <div className="grid gap-x-12 gap-y-8 lg:grid-cols-2">
-      <form onSubmit={handleSubmit} className="min-w-0 space-y-5">
+    <div className="grid gap-x-10 gap-y-8 lg:grid-cols-2">
+      <form onSubmit={handleSubmit} className="min-w-0 space-y-5 rounded-lg border border-line bg-raised p-5">
         <div>
           <label htmlFor="run-name" className="text-xs font-medium text-ink-2">
             Run name
@@ -162,7 +173,7 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
                 name="scope"
                 checked={scope === "sample"}
                 onChange={() => setScope("sample")}
-                className="accent-ink"
+                className="accent-accent"
               />
               The first
               <input
@@ -173,7 +184,7 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
                 onChange={(event) => setLimit(Math.max(1, Number(event.target.value) || 1))}
                 onFocus={() => setScope("sample")}
                 aria-label="Number of questions"
-                className="tnum w-16 rounded-md border border-line-strong bg-raised px-2 py-1 font-mono text-sm text-ink outline-none hover:border-ink focus:border-ink disabled:opacity-50"
+                className="tnum w-16 rounded-md border border-line-strong bg-raised px-2 py-1 font-mono text-sm text-ink outline-none hover:border-ink-2 focus:border-accent disabled:opacity-50"
               />
               questions, as a trial
             </label>
@@ -183,7 +194,7 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
                 name="scope"
                 checked={scope === "all"}
                 onChange={() => setScope("all")}
-                className="accent-ink"
+                className="accent-accent"
               />
               The whole reference set{total > 0 && ` (${total} questions)`}
             </label>
@@ -192,14 +203,14 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
 
         <fieldset disabled={running}>
           <legend className="text-xs font-medium text-ink-2">Configuration</legend>
-          <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-lg bg-sunken p-1">
+          <div className="mt-1.5 grid grid-cols-3 gap-0.5 rounded-md border border-line bg-sunken p-0.5">
             {CONFIGS.map((option) => (
               <label
                 key={option.value}
-                className={`flex cursor-pointer items-center justify-center rounded-md px-1.5 py-1.5 text-center text-[13px] leading-tight transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${
+                className={`flex cursor-pointer items-center justify-center rounded-[5px] px-1.5 py-1 text-center text-[13px] leading-tight transition-colors has-focus-visible:outline-2 has-focus-visible:outline-accent ${
                   config === option.value
-                    ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(11_11_11/0.08)]"
-                    : "text-ink-2 hover:text-ink"
+                    ? "bg-raised font-medium text-ink shadow-[0_1px_2px_rgb(16_19_24/0.08)]"
+                    : "text-muted hover:text-ink"
                 }`}
               >
                 <input
@@ -229,7 +240,7 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
                 step={0.25}
                 value={weight}
                 onChange={(event) => setWeight(Number(event.target.value))}
-                className="mt-2 w-full accent-ink"
+                className="mt-2 w-full accent-accent"
               />
             </label>
           )}
@@ -251,10 +262,10 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
           <button
             type="submit"
             disabled={running || submitting || !nameValid || (reference !== null && !reference.judge_configured)}
-            className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-ink/85 disabled:bg-sunken disabled:text-muted"
+            className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-strong disabled:bg-sunken disabled:text-muted"
           >
-            <Play />
-            {exists ? "Resume run" : `Run ${count} question${count === 1 ? "" : "s"}`}
+            <Play width="15" height="15" />
+            {submitting ? "Starting" : exists ? "Resume run" : `Run ${count} question${count === 1 ? "" : "s"}`}
           </button>
           <p className="tnum text-xs text-muted">
             Roughly {Math.max(2, count * 2)} minutes: about a minute to answer and a minute to
@@ -265,7 +276,7 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
 
       <div className="min-w-0">
         <h3 className="text-xs font-medium text-ink-2">Same run from a terminal</h3>
-        <pre className="mt-1.5 overflow-x-auto rounded-md border border-line bg-surface px-3 py-2.5 font-mono text-xs leading-relaxed text-ink">
+        <pre className="mt-1.5 overflow-x-auto rounded-md border border-line bg-raised px-3 py-2.5 font-mono text-xs leading-relaxed text-ink">
           {command}
         </pre>
         <p className="mt-1.5 text-xs text-muted">Run it from the repository root with the backend virtualenv active.</p>
@@ -298,10 +309,11 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
                   <button
                     type="button"
                     onClick={handleStop}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-xs text-ink hover:bg-sunken"
+                    disabled={stopping}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 py-1 text-xs text-ink hover:bg-sunken disabled:opacity-50"
                   >
                     <Stop width="14" height="14" />
-                    Stop
+                    {stopping ? "Stopping" : "Stop"}
                   </button>
                 )}
               </div>
@@ -326,7 +338,7 @@ export default function RunPanel({ reference, runs, status, onStatus }: Props) {
                   <summary className="cursor-pointer text-xs text-ink-2 hover:text-ink">
                     Log, last {status.log.length} lines
                   </summary>
-                  <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-surface px-3 py-2.5 font-mono text-[11px] leading-relaxed text-ink-2">
+                  <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-raised px-3 py-2.5 font-mono text-[11px] leading-relaxed text-ink-2">
                     {status.log.join("\n")}
                   </pre>
                 </details>

@@ -1,46 +1,45 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  --color-page: #f9f9f7;
-  --color-surface: #fcfcfb;
+  --color-page: #f5f6f8;
+  --color-surface: #fafbfc;
   --color-raised: #ffffff;
-  --color-sunken: #f1f0ec;
-  --color-ink: #0b0b0b;
-  --color-ink-2: #52514e;
-  --color-muted: #6b6964;
-  --color-line: #e1e0d9;
-  --color-line-strong: #c3c2b7;
+  --color-sunken: #eef0f3;
+  --color-ink: #101318;
+  --color-ink-2: #454b55;
+  --color-muted: #646b76;
+  --color-line: #e2e5ea;
+  --color-line-strong: #c9ced6;
 
-  --color-accent: #256abf;
-  --color-accent-strong: #184f95;
-  --color-accent-soft: #e6f0fc;
-  --color-accent-line: #b7d3f6;
+  --color-accent: #1d5bd6;
+  --color-accent-strong: #1647a8;
+  --color-accent-soft: #eaf1fd;
+  --color-accent-line: #bcd0f6;
 
-  --color-series-corpus: #2a78d6;
-  --color-series-web: #eb6834;
-  --color-series-mixed: #1baf7a;
-  --color-series-none: #c3c2b7;
+  --color-series-corpus: #1d5bd6;
+  --color-series-web: #d4622a;
+  --color-series-mixed: #13936a;
+  --color-series-none: #c9ced6;
 
-  --color-good: #006300;
-  --color-good-soft: #e3f3e3;
-  --color-warn: #8a5a00;
-  --color-warn-soft: #fdf0d0;
-  --color-bad: #b42a2a;
-  --color-bad-soft: #fbe6e6;
+  --color-good: #117a45;
+  --color-good-soft: #e5f4ec;
+  --color-warn: #8a5800;
+  --color-warn-soft: #fcf1dc;
+  --color-bad: #b42828;
+  --color-bad-soft: #fcebeb;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --animate-rise: rise 0.5s var(--ease-out-expo) both;
-  --animate-grow: grow 0.9s var(--ease-out-expo) both;
+  --animate-rise: rise 0.24s var(--ease-out-expo) both;
+  --animate-grow: grow 0.6s var(--ease-out-expo) both;
 }
 
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(4px);
   }
 }
 
@@ -50,31 +49,47 @@
   }
 }
 
-html {
-  background: var(--color-page);
-  color: var(--color-ink);
-  caret-color: var(--color-accent);
-  scrollbar-color: var(--color-line-strong) transparent;
-  scrollbar-width: thin;
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 
-::selection {
-  background: var(--color-accent-line);
-  color: var(--color-ink);
-}
+/* Layered so utilities such as focus-visible:outline-none can override them. */
+@layer base {
+  html {
+    background: var(--color-page);
+    color: var(--color-ink);
+    caret-color: var(--color-accent);
+    scrollbar-color: var(--color-line-strong) transparent;
+    scrollbar-width: thin;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
+  ::selection {
+    background: var(--color-accent-line);
+    color: var(--color-ink);
+  }
 
-a {
-  text-underline-offset: 3px;
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  a {
+    text-underline-offset: 3px;
+  }
 }
 
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-sunken) 25%, var(--color-line) 50%, var(--color-sunken) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
