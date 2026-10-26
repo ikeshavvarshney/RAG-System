@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useActiveViewer, useOpenViewer } from "@/components/DocumentViewer";
-import { Search, Trash } from "@/components/Icons";
+import { Chevron, Search, Trash } from "@/components/Icons";
 import { deleteCorpusDocument, type CorpusDocument } from "@/lib/viewer";
 
 interface Props {
@@ -40,15 +40,16 @@ export default function CorpusDocuments({ documents, offline, onChanged }: Props
   const passages = (documents ?? []).reduce((sum, document) => sum + document.chunk_count, 0);
 
   return (
-    <section className="mt-5" aria-label="Corpus documents">
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-xs font-semibold text-ink">
+    <details open className="group mt-5" aria-label="Corpus documents">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded px-1 [&::-webkit-details-marker]:hidden">
+        <h3 className="flex items-center gap-1 text-xs font-semibold text-ink">
+          <Chevron width="12" height="12" className="shrink-0 text-muted transition-transform group-open:rotate-90" />
           Corpus {documents && <span className="tnum font-normal text-muted">{documents.length}</span>}
         </h3>
         {documents && documents.length > 0 && (
           <span className="tnum text-[11px] text-muted">{passages.toLocaleString("en-US")} passages</span>
         )}
-      </div>
+      </summary>
 
       {documents === null && offline && (
         <p className="mt-2 flex gap-2 text-xs leading-relaxed text-ink-2" role="status">
@@ -70,7 +71,7 @@ export default function CorpusDocuments({ documents, offline, onChanged }: Props
 
       {documents !== null && documents.length === 0 && (
         <p className="mt-2 rounded-md border border-dashed border-line-strong px-3 py-3 text-xs leading-relaxed text-ink-2">
-          The corpus is empty. Upload documents above to make them searchable.
+          The corpus is empty. Add documents with the + button in the message box.
         </p>
       )}
 
@@ -161,6 +162,6 @@ export default function CorpusDocuments({ documents, offline, onChanged }: Props
           {error}
         </p>
       )}
-    </section>
+    </details>
   );
 }

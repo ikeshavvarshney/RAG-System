@@ -49,8 +49,7 @@ export default function Chat() {
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
-  const [showSources, setShowSources] = useState(false);
-  const [showChats, setShowChats] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [viewing, setViewing] = useState<ViewerTarget | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const { corpus, session, offline, refresh } = useDocuments();
@@ -58,7 +57,7 @@ export default function Chat() {
   const [dragging, setDragging] = useState(false);
 
   const openViewer = useCallback((target: ViewerTarget) => {
-    setShowSources(false);
+    setShowSidebar(false);
     setViewing(target);
   }, []);
   const closeViewer = useCallback(() => setViewing(null), []);
@@ -168,7 +167,7 @@ export default function Chat() {
   }
 
   function openChat(id: string | null) {
-    setShowChats(false);
+    setShowSidebar(false);
     setResetError(null);
     if (id !== null && id === activeId) return;
     leaveChat();
@@ -234,15 +233,17 @@ export default function Chat() {
       <div className="flex min-h-0 w-full flex-1">
         <aside
           className={`${
-            showChats ? "fixed inset-0 top-12 z-20 flex" : "hidden"
-          } w-full shrink-0 flex-col border-line bg-surface px-3 py-4 lg:static lg:flex lg:w-60 lg:border-r`}
-          aria-label="Chat history"
+            showSidebar ? "fixed inset-0 top-12 z-20 flex" : "hidden"
+          } w-full shrink-0 flex-col overflow-y-auto border-line bg-surface px-3 py-4 ${
+            viewing ? "xl:static xl:flex xl:w-72 xl:border-r" : "lg:static lg:flex lg:w-72 lg:border-r"
+          }`}
+          aria-label="Chats and sources"
         >
-          <div className="mb-3 flex justify-end lg:hidden">
+          <div className={`mb-3 flex justify-end ${viewing ? "xl:hidden" : "lg:hidden"}`}>
             <button
               type="button"
-              onClick={() => setShowChats(false)}
-              aria-label="Close chats"
+              onClick={() => setShowSidebar(false)}
+              aria-label="Close sidebar"
               className="rounded p-1 text-ink-2 hover:bg-sunken hover:text-ink"
             >
               <Close />
@@ -255,27 +256,7 @@ export default function Chat() {
             onNew={() => openChat(null)}
             onDelete={removeChat}
           />
-        </aside>
-
-        <aside
-          className={`${
-            showSources ? "fixed inset-0 top-12 z-20 flex" : "hidden"
-          } w-full shrink-0 flex-col overflow-y-auto border-line bg-surface px-4 py-4 ${
-            viewing ? "2xl:static 2xl:flex 2xl:w-72 2xl:border-r" : "xl:static xl:flex xl:w-72 xl:border-r"
-          }`}
-          aria-label="Sources"
-        >
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Sources</h2>
-            <button
-              type="button"
-              onClick={() => setShowSources(false)}
-              aria-label="Close sources"
-              className={`rounded p-1 text-ink-2 hover:bg-sunken hover:text-ink ${viewing ? "2xl:hidden" : "xl:hidden"}`}
-            >
-              <Close />
-            </button>
-          </div>
+          <h2 className="mt-6 border-t border-line px-1 pt-4 text-xs font-medium text-muted">Sources</h2>
           <SessionDocuments documents={session} onChanged={refresh} />
           <CorpusDocuments documents={corpus} offline={offline} onChanged={refresh} />
         </aside>
@@ -285,26 +266,15 @@ export default function Chat() {
             <button
               type="button"
               onClick={() => {
-                setShowSources(false);
-                setShowChats(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink lg:hidden"
-            >
-              Chats
-            </button>
-            <button
-              type="button"
-              onClick={() => {
                 setViewing(null);
-                setShowChats(false);
-                setShowSources(true);
+                setShowSidebar(true);
               }}
               className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink ${
-                viewing ? "2xl:hidden" : "xl:hidden"
+                viewing ? "xl:hidden" : "lg:hidden"
               }`}
             >
               <Doc width="15" height="15" />
-              Sources
+              Chats & sources
             </button>
             <p className="flex min-w-0 items-center gap-2 text-xs text-muted">
               <span className="hidden sm:inline">Answering from</span>

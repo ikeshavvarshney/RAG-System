@@ -23,7 +23,7 @@ function when(timestamp: number): string {
 
 export default function ChatList({ chats, activeId, onSelect, onNew, onDelete }: Props) {
   return (
-    <nav aria-label="Chats" className="flex min-h-0 flex-1 flex-col">
+    <nav aria-label="Chats" className="flex shrink-0 flex-col">
       <button
         type="button"
         onClick={onNew}
@@ -37,7 +37,7 @@ export default function ChatList({ chats, activeId, onSelect, onNew, onDelete }:
       {chats.length === 0 ? (
         <p className="px-1 text-xs leading-relaxed text-muted">Your conversations are kept in this browser and listed here.</p>
       ) : (
-        <ul className="-mx-1 min-h-0 flex-1 space-y-px overflow-y-auto">
+        <ul className="-mx-1 max-h-[40vh] space-y-px overflow-y-auto">
           {chats.map((chat) => {
             const active = chat.id === activeId;
             return (
