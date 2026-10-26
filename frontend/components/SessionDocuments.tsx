@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { useActiveViewer, useOpenViewer } from "@/components/DocumentViewer";
 import { Close } from "@/components/Icons";
 import { deleteSessionDocument, type SessionDocument } from "@/lib/api";
@@ -15,8 +16,14 @@ export default function SessionDocuments({ documents, onChanged }: Props) {
   const [removing, setRemoving] = useState<string | null>(null);
   const openViewer = useOpenViewer();
   const activeDoc = useActiveViewer()?.sourceDoc;
+  const confirm = useConfirm();
 
-  async function run(key: string, action: () => Promise<unknown>) {
+  async function run(
+    key: string,
+    question: { title: string; body: string; action: string },
+    action: () => Promise<unknown>,
+  ) {
+    if (!(await confirm(question))) return;
     setRemoving(key);
     setError(null);
     try {
@@ -40,9 +47,17 @@ export default function SessionDocuments({ documents, onChanged }: Props) {
         <button
           type="button"
           onClick={() =>
-            run("*", async () => {
-              for (const document of documents) await deleteSessionDocument(document.source_doc);
-            })
+            run(
+              "*",
+              {
+                title: `Remove ${documents.length === 1 ? "the document" : `all ${documents.length} documents`} from this chat?`,
+                body: "The conversation is kept. New questions in this chat will be answered from the corpus again.",
+                action: "Remove all",
+              },
+              async () => {
+                for (const document of documents) await deleteSessionDocument(document.source_doc);
+              },
+            )
           }
           disabled={removing !== null}
           className="text-xs text-accent-strong hover:underline disabled:opacity-40"
@@ -76,11 +91,21 @@ export default function SessionDocuments({ documents, onChanged }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => run(document.source_doc, () => deleteSessionDocument(document.source_doc))}
+              onClick={() =>
+                run(
+                  document.source_doc,
+                  {
+                    title: `Remove ${document.source_doc} from this chat?`,
+                    body: "Questions in this chat will no longer be answered from it.",
+                    action: "Remove",
+                  },
+                  () => deleteSessionDocument(document.source_doc),
+                )
+              }
               disabled={removing !== null}
               aria-label={`Remove ${document.source_doc} from this chat`}
               title="Remove from chat"
-              className="mr-1 shrink-0 rounded p-1 text-muted opacity-0 hover:bg-sunken hover:text-ink focus-visible:opacity-100 disabled:opacity-40 group-hover:opacity-100"
+              className="mr-1 shrink-0 rounded p-1 text-muted opacity-0 hover:bg-sunken hover:text-ink focus-visible:opacity-100 disabled:opacity-40 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
             >
               {removing === document.source_doc ? (
                 <span className="block size-3.5 animate-pulse rounded-full bg-line-strong" />

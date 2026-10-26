@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { useActiveViewer, useOpenViewer } from "@/components/DocumentViewer";
 import { Chevron, Search, Trash } from "@/components/Icons";
 import { deleteCorpusDocument, type CorpusDocument } from "@/lib/viewer";
@@ -13,18 +14,22 @@ interface Props {
 
 export default function CorpusDocuments({ documents, offline, onChanged }: Props) {
   const [filter, setFilter] = useState("");
-  const [confirming, setConfirming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const openViewer = useOpenViewer();
   const activeDoc = useActiveViewer()?.sourceDoc;
+  const confirm = useConfirm();
 
   async function handleDelete(sourceDoc: string) {
+    const ok = await confirm({
+      title: `Delete ${sourceDoc} from the corpus?`,
+      body: "It is removed for everyone using this system. This cannot be undone.",
+    });
+    if (!ok) return;
     setDeleting(sourceDoc);
     setError(null);
     try {
       await deleteCorpusDocument(sourceDoc);
-      setConfirming(null);
       onChanged();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -92,7 +97,6 @@ export default function CorpusDocuments({ documents, offline, onChanged }: Props
       {visible.length > 0 && (
         <ul className="mt-1.5 space-y-px">
           {visible.map((document) => {
-            const asking = confirming === document.source_doc;
             const busy = deleting === document.source_doc;
             return (
               <li
@@ -114,39 +118,21 @@ export default function CorpusDocuments({ documents, offline, onChanged }: Props
                       {document.pages !== null && ` · ${document.pages} pages`}
                     </span>
                   </button>
-                  {!asking && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirming(document.source_doc)}
-                      aria-label={`Delete ${document.source_doc} from the corpus`}
-                      title="Delete from corpus"
-                      className="mr-1 shrink-0 rounded p-1 text-muted opacity-0 hover:bg-bad-soft hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
-                    >
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(document.source_doc)}
+                    disabled={busy}
+                    aria-label={`Delete ${document.source_doc} from the corpus`}
+                    title="Delete from corpus"
+                    className={`mr-1 shrink-0 rounded p-1 text-muted hover:bg-bad-soft hover:text-bad focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 ${busy ? "opacity-100" : "opacity-0"}`}
+                  >
+                    {busy ? (
+                      <span className="block size-3.5 animate-pulse rounded-full bg-line-strong" />
+                    ) : (
                       <Trash width="14" height="14" />
-                    </button>
-                  )}
+                    )}
+                  </button>
                 </div>
-                {asking && (
-                  <div className="flex items-center gap-2 px-1.5 pb-1.5 text-xs">
-                    <span className="text-ink-2">Delete for everyone?</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(document.source_doc)}
-                      disabled={busy}
-                      className="ml-auto rounded bg-bad px-2 py-0.5 font-medium text-white hover:bg-bad/85 disabled:opacity-50"
-                    >
-                      {busy ? "Deleting" : "Delete"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirming(null)}
-                      disabled={busy}
-                      className="rounded px-2 py-0.5 text-ink-2 hover:bg-sunken hover:text-ink"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
               </li>
             );
           })}

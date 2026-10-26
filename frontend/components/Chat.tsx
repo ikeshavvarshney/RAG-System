@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import AnswerCard, { type AnswerState } from "@/components/AnswerCard";
 import ChatList from "@/components/ChatList";
+import { useConfirm } from "@/components/ConfirmDialog";
 import CorpusDocuments from "@/components/CorpusDocuments";
 import DocumentViewer, { ActiveViewerContext, ViewerContext } from "@/components/DocumentViewer";
 import { AttachButton, AttachStatus, useAttachments } from "@/components/Attachments";
@@ -54,6 +55,7 @@ export default function Chat() {
   const [resetError, setResetError] = useState<string | null>(null);
   const { corpus, session, offline, refresh } = useDocuments();
   const attachments = useAttachments(handleIngested);
+  const confirm = useConfirm();
   const [dragging, setDragging] = useState(false);
 
   const openViewer = useCallback((target: ViewerTarget) => {
@@ -181,7 +183,12 @@ export default function Chat() {
   }
 
   async function removeChat(id: string) {
-    if (!window.confirm("Delete this chat and the documents uploaded to it?")) return;
+    const title = chats.find((chat) => chat.id === id)?.title ?? "this chat";
+    const ok = await confirm({
+      title: "Delete this chat?",
+      body: `"${title}" and any documents uploaded to it will be deleted. This cannot be undone.`,
+    });
+    if (!ok) return;
     if (id === activeId) openChat(null);
     setChats((prev) => saveChats(prev.filter((chat) => chat.id !== id)));
     try {
