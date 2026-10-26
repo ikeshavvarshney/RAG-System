@@ -124,6 +124,10 @@ export function currentSessionId(): string | null {
   return readStoredId();
 }
 
+export function setCurrentSessionId(sessionId: string | null): void {
+  writeStoredId(sessionId);
+}
+
 export interface SessionDocument {
   source_doc: string;
   chunk_count: number;
@@ -168,9 +172,8 @@ export async function deleteSessionDocument(sourceDoc: string): Promise<number> 
   return ((await response.json()) as { deleted_chunks: number }).deleted_chunks;
 }
 
-/** Delete this session's uploads and forget the id. */
-export async function deleteSession(): Promise<boolean> {
-  const sessionId = currentSessionId();
+/** Delete a session's uploads and conversation context, forgetting the id if it is the current one. */
+export async function deleteSession(sessionId: string | null = currentSessionId()): Promise<boolean> {
   if (!sessionId) return false;
 
   const response = await apiFetch(`/session/${sessionId}`, {
@@ -181,23 +184,8 @@ export async function deleteSession(): Promise<boolean> {
   if (!response.ok) {
     throw new Error(`Could not clear the session: ${response.status}`);
   }
-  writeStoredId(null);
+  if (readStoredId() === sessionId) writeStoredId(null);
   return ((await response.json()) as { deleted: boolean }).deleted;
-}
-
-/** Forget this session's conversation turns; its uploads are kept. */
-export async function clearHistory(): Promise<void> {
-  const sessionId = currentSessionId();
-  if (!sessionId) return;
-
-  const response = await apiFetch(`/session/${sessionId}/history`, { method: "DELETE" });
-  if (response.status === 400) {
-    writeStoredId(null);
-    return;
-  }
-  if (!response.ok) {
-    throw new Error(`Could not start a new conversation: ${response.status}`);
-  }
 }
 
 export function fileExtension(name: string): string {

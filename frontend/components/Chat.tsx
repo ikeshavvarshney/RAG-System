@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import AnswerCard, { type AnswerState } from "@/components/AnswerCard";
+import ChatList from "@/components/ChatList";
 import CorpusDocuments from "@/components/CorpusDocuments";
 import DocumentViewer, { ActiveViewerContext, ViewerContext } from "@/components/DocumentViewer";
 import FileUpload from "@/components/FileUpload";
@@ -9,14 +10,19 @@ import { ArrowUp, Close, Doc, Plus, Stop } from "@/components/Icons";
 import SessionDocuments from "@/components/SessionDocuments";
 import { applyStageEvent } from "@/components/StageProgress";
 import { useDocuments } from "@/components/useDocuments";
-import { clearHistory, streamQuery } from "@/lib/api";
+import {
+  currentSessionId,
+  deleteSession,
+  getSessionId,
+  setCurrentSessionId,
+  streamQuery,
+  type IngestResponse,
+  type IngestTarget,
+} from "@/lib/api";
+import { loadChats, saveChats, upsertChat, type ChatEntry, type ChatRecord } from "@/lib/chats";
 import type { ViewerTarget } from "@/lib/viewer";
 
-interface Turn {
-  id: string;
-  question: string;
-  state: AnswerState;
-}
+type Turn = Extract<ChatEntry, { kind: "turn" }>;
 
 const EXAMPLES = [
   "What is the combined nameplate capacity of Nigeria's four state-owned refineries?",
@@ -26,12 +32,25 @@ const EXAMPLES = [
 ];
 
 const EMPTY_STATE: AnswerState = { stages: [], usage: [] };
+const STOPPED = "Stopped before an answer arrived.";
+
+function stopPending(entries: ChatEntry[]): ChatEntry[] {
+  return entries.map((entry) =>
+    entry.kind === "turn" && !entry.state.result && !entry.state.error
+      ? { ...entry, state: { ...entry.state, error: STOPPED } }
+      : entry,
+  );
+}
 
 export default function Chat() {
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [entries, setEntries] = useState<ChatEntry[]>([]);
+  const [chats, setChats] = useState<ChatRecord[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [showChats, setShowChats] = useState(false);
   const [viewing, setViewing] = useState<ViewerTarget | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const { corpus, session, offline, refresh } = useDocuments();
@@ -48,8 +67,25 @@ export default function Chat() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
+    const stored = loadChats();
+    const current = currentSessionId();
+    const chat = stored.find((item) => item.id === current);
+    setChats(stored);
+    setActiveId(current);
+    setEntries(chat?.entries ?? []);
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !activeId || entries.length === 0) return;
+    setChats((prev) =>
+      prev.find((chat) => chat.id === activeId)?.entries === entries ? prev : saveChats(upsertChat(prev, activeId, entries)),
+    );
+  }, [loaded, activeId, entries]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns]);
+  }, [entries]);
 
   useEffect(() => {
     const field = inputRef.current;
@@ -60,12 +96,17 @@ export default function Chat() {
 
   async function run(turnId: string, question: string) {
     const update = (change: (state: AnswerState) => AnswerState) =>
-      setTurns((prev) => prev.map((turn) => (turn.id === turnId ? { ...turn, state: change(turn.state) } : turn)));
+      setEntries((prev) =>
+        prev.map((entry) =>
+          entry.kind === "turn" && entry.id === turnId ? { ...entry, state: change(entry.state) } : entry,
+        ),
+      );
 
     setPending(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      setActiveId(await getSessionId());
       const result = await streamQuery(
         question,
         {
@@ -85,16 +126,14 @@ export default function Chat() {
     } catch (error) {
       update((state) => ({
         ...state,
-        error: controller.signal.aborted
-          ? "Stopped before an answer arrived."
-          : error instanceof Error
-            ? error.message
-            : String(error),
+        error: controller.signal.aborted ? STOPPED : error instanceof Error ? error.message : String(error),
       }));
     } finally {
-      abortRef.current = null;
-      setPending(false);
-      inputRef.current?.focus();
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setPending(false);
+        inputRef.current?.focus();
+      }
     }
   }
 
@@ -102,28 +141,61 @@ export default function Chat() {
     const text = question.trim();
     if (!text || pending) return;
     const id = crypto.randomUUID();
-    setTurns((prev) => [...prev, { id, question: text, state: EMPTY_STATE }]);
+    setEntries((prev) => [...prev, { kind: "turn", id, question: text, state: EMPTY_STATE }]);
     setInput("");
     void run(id, text);
   }
 
   function retry(turn: Turn) {
     if (pending) return;
-    setTurns((prev) => prev.map((item) => (item.id === turn.id ? { ...item, state: EMPTY_STATE } : item)));
+    setEntries((prev) =>
+      prev.map((entry) => (entry.kind === "turn" && entry.id === turn.id ? { ...entry, state: EMPTY_STATE } : entry)),
+    );
     void run(turn.id, turn.question);
   }
 
-  async function newConversation() {
-    abortRef.current?.abort();
-    setTurns([]);
-    setInput("");
+  // Saves a running answer as stopped, so the chat left behind is not stuck mid-stream.
+  function leaveChat() {
+    if (!abortRef.current) return;
+    abortRef.current.abort();
+    abortRef.current = null;
+    setPending(false);
+    if (activeId && entries.length > 0) {
+      setChats((prev) => saveChats(upsertChat(prev, activeId, stopPending(entries))));
+    }
+  }
+
+  function openChat(id: string | null) {
+    setShowChats(false);
     setResetError(null);
+    if (id !== null && id === activeId) return;
+    leaveChat();
+    setCurrentSessionId(id);
+    setActiveId(id);
+    setEntries(chats.find((chat) => chat.id === id)?.entries ?? []);
+    setInput("");
+    setViewing(null);
+    refresh();
+    inputRef.current?.focus();
+  }
+
+  async function removeChat(id: string) {
+    if (!window.confirm("Delete this chat and the documents uploaded to it?")) return;
+    if (id === activeId) openChat(null);
+    setChats((prev) => saveChats(prev.filter((chat) => chat.id !== id)));
     try {
-      await clearHistory();
+      await deleteSession(id);
     } catch (error) {
       setResetError(error instanceof Error ? error.message : String(error));
     }
-    inputRef.current?.focus();
+    refresh();
+  }
+
+  function handleIngested(result: IngestResponse, target: IngestTarget) {
+    refresh();
+    if (target !== "session" || result.succeeded.length === 0) return;
+    setActiveId(currentSessionId());
+    setEntries((prev) => [...prev, { kind: "upload", id: crypto.randomUUID(), files: result.succeeded, at: Date.now() }]);
   }
 
   function handleSubmit(event: FormEvent) {
@@ -138,10 +210,10 @@ export default function Chat() {
     }
   }
 
-  const empty = turns.length === 0;
+  const empty = entries.length === 0;
   const sessionScoped = session.length > 0;
   const scopeLabel = sessionScoped
-    ? `This session · ${session.length} document${session.length === 1 ? "" : "s"}`
+    ? `This chat · ${session.length} document${session.length === 1 ? "" : "s"}`
     : corpus
       ? `Corpus · ${corpus.length} document${corpus.length === 1 ? "" : "s"}`
       : "Corpus";
@@ -152,9 +224,34 @@ export default function Chat() {
       <div className="flex min-h-0 w-full flex-1">
         <aside
           className={`${
+            showChats ? "fixed inset-0 top-12 z-20 flex" : "hidden"
+          } w-full shrink-0 flex-col border-line bg-surface px-3 py-4 lg:static lg:flex lg:w-60 lg:border-r`}
+          aria-label="Chat history"
+        >
+          <div className="mb-3 flex justify-end lg:hidden">
+            <button
+              type="button"
+              onClick={() => setShowChats(false)}
+              aria-label="Close chats"
+              className="rounded p-1 text-ink-2 hover:bg-sunken hover:text-ink"
+            >
+              <Close />
+            </button>
+          </div>
+          <ChatList
+            chats={chats}
+            activeId={activeId}
+            onSelect={openChat}
+            onNew={() => openChat(null)}
+            onDelete={removeChat}
+          />
+        </aside>
+
+        <aside
+          className={`${
             showSources ? "fixed inset-0 top-12 z-20 flex" : "hidden"
           } w-full shrink-0 flex-col overflow-y-auto border-line bg-surface px-4 py-4 ${
-            viewing ? "xl:static xl:flex xl:w-72 xl:border-r" : "lg:static lg:flex lg:w-72 lg:border-r"
+            viewing ? "2xl:static 2xl:flex 2xl:w-72 2xl:border-r" : "xl:static xl:flex xl:w-72 xl:border-r"
           }`}
           aria-label="Sources"
         >
@@ -164,12 +261,12 @@ export default function Chat() {
               type="button"
               onClick={() => setShowSources(false)}
               aria-label="Close sources"
-              className={`rounded p-1 text-ink-2 hover:bg-sunken hover:text-ink ${viewing ? "xl:hidden" : "lg:hidden"}`}
+              className={`rounded p-1 text-ink-2 hover:bg-sunken hover:text-ink ${viewing ? "2xl:hidden" : "xl:hidden"}`}
             >
               <Close />
             </button>
           </div>
-          <FileUpload onIngested={refresh} />
+          <FileUpload onIngested={handleIngested} />
           <SessionDocuments documents={session} onChanged={refresh} />
           <CorpusDocuments documents={corpus} offline={offline} onChanged={refresh} />
         </aside>
@@ -179,11 +276,22 @@ export default function Chat() {
             <button
               type="button"
               onClick={() => {
+                setShowSources(false);
+                setShowChats(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink lg:hidden"
+            >
+              Chats
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setViewing(null);
+                setShowChats(false);
                 setShowSources(true);
               }}
               className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-ink-2 hover:bg-sunken hover:text-ink ${
-                viewing ? "xl:hidden" : "lg:hidden"
+                viewing ? "2xl:hidden" : "xl:hidden"
               }`}
             >
               <Doc width="15" height="15" />
@@ -201,9 +309,9 @@ export default function Chat() {
             </p>
             <button
               type="button"
-              onClick={newConversation}
+              onClick={() => openChat(null)}
               disabled={empty && !pending}
-              className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-[13px] text-ink hover:bg-sunken disabled:border-line disabled:text-muted disabled:hover:bg-transparent"
+              className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-[13px] text-ink hover:bg-sunken disabled:border-line disabled:text-muted disabled:hover:bg-transparent lg:hidden"
             >
               <Plus width="14" height="14" />
               New chat
@@ -226,20 +334,29 @@ export default function Chat() {
                 />
               ) : (
                 <div className="space-y-10">
-                  {turns.map((turn) => (
-                    <div key={turn.id} className="animate-rise">
-                      <p className="whitespace-pre-wrap text-pretty rounded-lg bg-sunken px-4 py-2.5 text-[15px] font-medium leading-snug">
-                        {turn.question}
+                  {entries.map((entry) =>
+                    entry.kind === "upload" ? (
+                      <p key={entry.id} className="flex items-start gap-2 text-xs leading-relaxed text-muted">
+                        <Doc className="mt-0.5 shrink-0" width="14" height="14" />
+                        <span>
+                          Uploaded to this chat: <span className="text-ink-2">{entry.files.join(", ")}</span>
+                        </span>
                       </p>
-                      <div className="mt-4">
-                        <AnswerCard
-                          id={turn.id}
-                          state={turn.state}
-                          onRetry={pending ? undefined : () => retry(turn)}
-                        />
+                    ) : (
+                      <div key={entry.id} className="animate-rise">
+                        <p className="whitespace-pre-wrap text-pretty rounded-lg bg-sunken px-4 py-2.5 text-[15px] font-medium leading-snug">
+                          {entry.question}
+                        </p>
+                        <div className="mt-4">
+                          <AnswerCard
+                            id={entry.id}
+                            state={entry.state}
+                            onRetry={pending ? undefined : () => retry(entry)}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ),
+                  )}
                 </div>
               )}
               <div ref={bottomRef} className="h-4" />
@@ -258,7 +375,7 @@ export default function Chat() {
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={sessionScoped ? "Ask about your session documents" : "Ask about the corpus"}
+                placeholder={sessionScoped ? "Ask about this chat's documents" : "Ask about the corpus"}
                 className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] leading-relaxed outline-none placeholder:text-muted focus-visible:outline-none"
               />
               {pending ? (
@@ -325,10 +442,10 @@ function EmptyState({
       {corpusEmpty && (
         <div className="mt-6 rounded-md border border-warn/30 bg-warn-soft px-3 py-2.5 text-sm text-warn">
           Nothing is indexed yet, so questions can only be answered from the web.{" "}
-          <button type="button" onClick={onUpload} className="font-medium underline lg:hidden">
+          <button type="button" onClick={onUpload} className="font-medium underline xl:hidden">
             Upload documents
           </button>
-          <span className="hidden lg:inline">Upload documents in the Sources panel.</span>
+          <span className="hidden xl:inline">Upload documents in the Sources panel.</span>
         </div>
       )}
 

@@ -21,19 +21,19 @@ type Phase =
   | { kind: "error"; message: string };
 
 interface Props {
-  onIngested?: (result: IngestResponse) => void;
+  onIngested?: (result: IngestResponse, target: IngestTarget) => void;
 }
 
 const TARGETS: { value: IngestTarget; label: string; hint: string }[] = [
   {
+    value: "session",
+    label: "This chat",
+    hint: "Private to this chat. While the chat holds documents, questions are answered from them alone.",
+  },
+  {
     value: "corpus",
     label: "Corpus",
     hint: "Stored permanently and searched by everyone using this system.",
-  },
-  {
-    value: "session",
-    label: "This session",
-    hint: "Private to this browser. While the session holds documents, questions are answered from them alone.",
   },
 ];
 
@@ -42,7 +42,7 @@ export default function FileUpload({ onIngested }: Props) {
   const [rejected, setRejected] = useState<{ name: string; reason: string }[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [dragging, setDragging] = useState(false);
-  const [target, setTarget] = useState<IngestTarget>("corpus");
+  const [target, setTarget] = useState<IngestTarget>("session");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const busy = phase.kind === "uploading" || phase.kind === "processing";
@@ -108,7 +108,7 @@ export default function FileUpload({ onIngested }: Props) {
       setQueue([]);
       setRejected([]);
       setPhase({ kind: "done", result });
-      onIngested?.(result);
+      onIngested?.(result, target);
     } catch (error) {
       setPhase({
         kind: "error",

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useActiveViewer, useOpenViewer } from "@/components/DocumentViewer";
 import { Close } from "@/components/Icons";
-import { deleteSession, deleteSessionDocument, type SessionDocument } from "@/lib/api";
+import { deleteSessionDocument, type SessionDocument } from "@/lib/api";
 
 interface Props {
   documents: SessionDocument[];
@@ -32,14 +32,18 @@ export default function SessionDocuments({ documents, onChanged }: Props) {
   if (documents.length === 0) return null;
 
   return (
-    <section className="mt-5 rounded-md border border-accent-line bg-accent-soft/60 p-2.5" aria-label="Session documents">
+    <section className="mt-5 rounded-md border border-accent-line bg-accent-soft/60 p-2.5" aria-label="Chat documents">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-xs font-semibold text-ink">
-          This session <span className="tnum font-normal text-muted">{documents.length}</span>
+          This chat <span className="tnum font-normal text-muted">{documents.length}</span>
         </h3>
         <button
           type="button"
-          onClick={() => run("*", deleteSession)}
+          onClick={() =>
+            run("*", async () => {
+              for (const document of documents) await deleteSessionDocument(document.source_doc);
+            })
+          }
           disabled={removing !== null}
           className="text-xs text-accent-strong hover:underline disabled:opacity-40"
         >
@@ -74,8 +78,8 @@ export default function SessionDocuments({ documents, onChanged }: Props) {
               type="button"
               onClick={() => run(document.source_doc, () => deleteSessionDocument(document.source_doc))}
               disabled={removing !== null}
-              aria-label={`Remove ${document.source_doc} from this session`}
-              title="Remove from session"
+              aria-label={`Remove ${document.source_doc} from this chat`}
+              title="Remove from chat"
               className="mr-1 shrink-0 rounded p-1 text-muted opacity-0 hover:bg-sunken hover:text-ink focus-visible:opacity-100 disabled:opacity-40 group-hover:opacity-100"
             >
               {removing === document.source_doc ? (
