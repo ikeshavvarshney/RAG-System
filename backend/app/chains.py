@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableLambda
 
-from app.core.usage import usage_sink
+from app.core.usage import model_status_sink, usage_sink
 from app.ingestion.pipeline import IngestResult, ingest_files
 from app.query.emitter import NullEmitter
 from app.query.pipeline import QueryResult, run_query
@@ -15,9 +15,11 @@ async def _run_query_stage(inputs: dict[str, Any]) -> QueryResult:
     """inputs: question, session_id, and optionally an emitter (a NullEmitter when absent)."""
     emitter = inputs.get("emitter") or NullEmitter()
     token = usage_sink.set(emitter.usage)
+    status_token = model_status_sink.set(emitter.model_status)
     try:
         return await run_query(inputs["question"], inputs["session_id"], on_event=emitter.stage)
     finally:
+        model_status_sink.reset(status_token)
         usage_sink.reset(token)
 
 

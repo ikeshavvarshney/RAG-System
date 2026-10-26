@@ -381,9 +381,18 @@ export interface UsageEvent {
   total_tokens: number;
 }
 
+export interface ModelStatusEvent {
+  reason: "overloaded" | "slow";
+  stage: string;
+  model: string;
+  retry_in_sec?: number;
+  elapsed_sec?: number;
+}
+
 export interface QueryHandlers {
   onStage?: (event: StageEvent) => void;
   onUsage?: (event: UsageEvent) => void;
+  onModelStatus?: (event: ModelStatusEvent) => void;
 }
 
 /** Ask a question over the SSE endpoint. Resolves with the terminal `result`. */
@@ -437,6 +446,7 @@ export async function streamQuery(
 
       if (name === "stage") handlers.onStage?.(payload as StageEvent);
       else if (name === "usage") handlers.onUsage?.(payload as UsageEvent);
+      else if (name === "model_status") handlers.onModelStatus?.(payload as ModelStatusEvent);
       else if (name === "result") {
         const result = payload as QueryResponse;
         log("info", `query answered in ${Math.round(performance.now() - startedAt)}ms`, {

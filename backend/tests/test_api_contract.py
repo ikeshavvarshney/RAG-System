@@ -353,3 +353,22 @@ def test_removed_claims_default_to_empty(client, fake_llm):
     body = client.post("/api/query", json={"question": "hello there"}).json()
 
     assert body["removed_claims"] == []
+
+
+def test_stream_forwards_model_status_before_the_result(client, monkeypatch):
+    from app.core.usage import model_status_sink
+
+    async def fake_run_query(question, session_id, on_event=None):
+        payload = {"reason": "overloaded", "stage": "query_generation", "model": "m", "retry_in_sec": 10.0}
+        await asyncio.to_thread(lambda: model_status_sink.get()(payload))
+        return _result(CORPUS)
+
+    monkeypatch.setattr("app.chains.run_query", fake_run_query)
+
+    with client.stream("POST", "/api/query/stream", json={"question": "q", "session_id": SESSION}) as response:
+        response.read()
+    frames = _frames(response)
+
+    assert [name for name, _ in frames] == ["model_status", "result"]
+    assert frames[0][1]["reason"] == "overloaded" and frames[0][1]["retry_in_sec"] == 10.0
+    assert model_status_sink.get() is None

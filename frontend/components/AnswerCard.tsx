@@ -5,13 +5,26 @@ import Citations, { AnswerBadges, AnswerText, QuestionNotes } from "@/components
 import { Check, Copy, Retry } from "@/components/Icons";
 import StageProgress, { type StageRow } from "@/components/StageProgress";
 import UsagePanel from "@/components/UsagePanel";
-import type { QueryResponse, UsageEvent } from "@/lib/api";
+import type { ModelStatusEvent, QueryResponse, UsageEvent } from "@/lib/api";
 
 export interface AnswerState {
   stages: StageRow[];
   usage: UsageEvent[];
+  modelStatus?: ModelStatusEvent;
   result?: QueryResponse;
   error?: string;
+}
+
+function ModelStatusNotice({ status }: { status: ModelStatusEvent }) {
+  const message =
+    status.reason === "overloaded"
+      ? `Gemini (${status.model}) is overloaded right now, retrying in ${status.retry_in_sec ?? 0} s.`
+      : `Gemini (${status.model}) is responding slowly right now.`;
+  return (
+    <p className="mt-2.5 rounded-md border border-warn/25 bg-warn-soft px-2.5 py-1.5 text-xs text-warn">
+      {message} The answer is still on its way.
+    </p>
+  );
 }
 
 const action =
@@ -47,7 +60,7 @@ export default function AnswerCard({
   state: AnswerState;
   onRetry?: () => void;
 }) {
-  const { stages, usage, result, error } = state;
+  const { stages, usage, modelStatus, result, error } = state;
   const running = !result && !error;
   const totalMs = stages.reduce((sum, row) => sum + (row.durationMs ?? 0), 0);
   const current = [...stages].reverse().find((row) => row.status === "started");
@@ -61,6 +74,7 @@ export default function AnswerCard({
             {stages.length === 0 ? "Starting" : current ? "Running the pipeline" : "Finishing"}
           </p>
           <StageProgress rows={stages} />
+          {modelStatus && <ModelStatusNotice status={modelStatus} />}
         </div>
       )}
 

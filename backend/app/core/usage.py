@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 # started with asyncio.to_thread inherit the binding.
 usage_sink: ContextVar[Callable[[str, str, int, int], None] | None] = ContextVar("usage_sink", default=None)
 
+# Bound the same way. The Gemini client reports through it when a model is overloaded or slow, so the chat can
+# say why an answer is taking long.
+model_status_sink: ContextVar[Callable[[dict], None] | None] = ContextVar("model_status_sink", default=None)
+
 
 @dataclass
 class UsageEntry:

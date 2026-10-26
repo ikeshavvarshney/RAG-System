@@ -572,3 +572,69 @@ def test_a_rate_limit_does_not_use_the_overload_schedule(monkeypatch):
 
     assert sleeps == []
     assert mock_client_cls.return_value.models.generate_content.call_count == 2
+
+
+def test_a_slow_call_is_reported_while_it_is_still_running(monkeypatch):
+    import threading
+
+    from app.core.usage import model_status_sink
+
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    monkeypatch.setattr(gc, "SLOW_CALL_NOTICE_SEC", 0.05)
+    reported = threading.Event()
+    statuses = []
+
+    def sink(payload):
+        statuses.append(payload)
+        reported.set()
+
+    def slow_call(**_):
+        assert reported.wait(5), "the notice should arrive before the call returns"
+        return _ok_response("recovered")
+
+    token = model_status_sink.set(sink)
+    try:
+        with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.side_effect = slow_call
+            assert GeminiClient(backoff_base=0).generate(stage="s", model="m", prompt="p") == "recovered"
+    finally:
+        model_status_sink.reset(token)
+
+    assert statuses == [{"reason": "slow", "stage": "s", "model": "m", "elapsed_sec": 0.05}]
+
+
+def test_a_fast_call_reports_nothing(monkeypatch):
+    import time
+
+    from app.core.usage import model_status_sink
+
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    monkeypatch.setattr(gc, "SLOW_CALL_NOTICE_SEC", 0.05)
+    statuses = []
+    token = model_status_sink.set(statuses.append)
+    try:
+        with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = _ok_response()
+            GeminiClient(backoff_base=0).generate(stage="s", model="m", prompt="p")
+        time.sleep(0.15)
+    finally:
+        model_status_sink.reset(token)
+
+    assert statuses == []
+
+
+def test_an_overload_retry_is_reported_and_the_call_still_succeeds(monkeypatch):
+    from app.core.usage import model_status_sink
+
+    monkeypatch.setattr(gc, "gemini_keys", KeyRotator("key-a"))
+    monkeypatch.setattr(gc.time, "sleep", lambda _: None)
+    statuses = []
+    token = model_status_sink.set(statuses.append)
+    try:
+        with patch("app.core.gemini_client.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.side_effect = [_overloaded(), _ok_response("recovered")]
+            assert GeminiClient(backoff_base=0).generate(stage="s", model="m", prompt="p") == "recovered"
+    finally:
+        model_status_sink.reset(token)
+
+    assert statuses == [{"reason": "overloaded", "stage": "s", "model": "m", "retry_in_sec": 10.0}]

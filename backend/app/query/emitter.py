@@ -38,6 +38,9 @@ class NullEmitter:
         self.usage_events.append(payload)
         self._publish("usage", payload)
 
+    def model_status(self, payload: dict[str, Any]) -> None:
+        self._publish("model_status", payload)
+
     def finish(self, name: str, payload: dict[str, Any]) -> None:
         self._publish(name, payload)
 

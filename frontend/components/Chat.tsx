@@ -73,6 +73,11 @@ export default function Chat() {
             update((state) => ({ ...state, stages: applyStageEvent(state.stages, event) })),
           onUsage: (event) =>
             update((state) => ({ ...state, usage: [...state.usage, event] })),
+          onModelStatus: (event) =>
+            update((state) => ({
+              ...state,
+              modelStatus: state.modelStatus?.reason === "overloaded" && event.reason === "slow" ? state.modelStatus : event,
+            })),
         },
         controller.signal,
       );

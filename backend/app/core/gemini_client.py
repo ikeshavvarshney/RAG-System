@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import logging
 import threading
 import time
@@ -10,9 +11,35 @@ from google.genai import types
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from app.core.key_rotation import call_with_key_rotation, gemini_keys
-from app.core.usage import UsageTracker
+from app.core.usage import UsageTracker, model_status_sink
 
 logger = logging.getLogger(__name__)
+
+# A text call still running after this long is reported as slow; the lite models normally answer in a few seconds.
+SLOW_CALL_NOTICE_SEC = 10.0
+
+
+def _report_model_status(sink, payload: dict) -> None:
+    try:
+        sink(payload)
+    except Exception:  # noqa: BLE001 - reporting must never fail a model call
+        logger.warning("model status sink failed", exc_info=True)
+
+
+@contextlib.contextmanager
+def _watch_slow_call(sink, stage: str, model: str):
+    """Report once through ``sink`` if the wrapped call is still running after SLOW_CALL_NOTICE_SEC."""
+    if sink is None:
+        yield
+        return
+    payload = {"reason": "slow", "stage": stage, "model": model, "elapsed_sec": SLOW_CALL_NOTICE_SEC}
+    timer = threading.Timer(SLOW_CALL_NOTICE_SEC, _report_model_status, (sink, payload))
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
 
 # Substrings that identify a rate-limit / quota response across the various
 # exception types the Gemini SDK and its transports can raise.
@@ -267,9 +294,9 @@ class GeminiClient:
         for api_key in gemini_keys.keys:
             self._embedder_for(api_key, model_id)
 
-    def _retry_overloaded(self, operation, delays: tuple[float, ...]):
+    def _retry_overloaded(self, operation, delays: tuple[float, ...], on_retry=None):
         """Retry ``operation`` on a 503 after each of ``delays``; the error that ends the last attempt is marked so the
-        key rotation does not retry it again."""
+        key rotation does not retry it again. ``on_retry(delay)`` is called before each wait."""
 
         def wrapped(api_key: str):
             for attempt in range(len(delays) + 1):
@@ -285,6 +312,8 @@ class GeminiClient:
                         "Gemini model overloaded (%s); retry %d/%d in %.0fs",
                         str(exc)[:80], attempt + 1, len(delays), delays[attempt],
                     )
+                    if on_retry is not None:
+                        on_retry(delays[attempt])
                     time.sleep(delays[attempt])
 
         return wrapped
@@ -297,9 +326,10 @@ class GeminiClient:
         max_retries: int | None = None,
         retry_timeouts: bool = False,
         overload_delays: tuple[float, ...] | None = None,
+        on_overload=None,
     ):
         if overload_delays is not None:
-            operation = self._retry_overloaded(operation, overload_delays)
+            operation = self._retry_overloaded(operation, overload_delays, on_overload)
 
         def retryable(exc: BaseException) -> bool:
             if getattr(exc, "_overload_exhausted", False):
@@ -342,10 +372,13 @@ class GeminiClient:
         prompt: str,
         config: types.GenerateContentConfig | None = None,
     ) -> str:
+        sink = model_status_sink.get()
+
         def _operation(api_key: str) -> str:
-            response = self._client_for(api_key).models.generate_content(
-                model=model, contents=prompt, config=config
-            )
+            with _watch_slow_call(sink, stage, model):
+                response = self._client_for(api_key).models.generate_content(
+                    model=model, contents=prompt, config=config
+                )
 
             usage = response.usage_metadata
             self.tracker.record(
@@ -356,8 +389,16 @@ class GeminiClient:
             )
             return response.text
 
+        def _on_overload(delay: float) -> None:
+            if sink is not None:
+                _report_model_status(sink, {"reason": "overloaded", "stage": stage, "model": model, "retry_in_sec": delay})
+
         return self._call_with_key_rotation(
-            _operation, scope=model, retry_timeouts=True, overload_delays=self.overload_delays
+            _operation,
+            scope=model,
+            retry_timeouts=True,
+            overload_delays=self.overload_delays,
+            on_overload=_on_overload,
         )
 
     def generate_vision(
