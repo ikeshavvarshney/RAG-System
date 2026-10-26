@@ -5,7 +5,7 @@ import AnswerCard, { type AnswerState } from "@/components/AnswerCard";
 import ChatList from "@/components/ChatList";
 import CorpusDocuments from "@/components/CorpusDocuments";
 import DocumentViewer, { ActiveViewerContext, ViewerContext } from "@/components/DocumentViewer";
-import FileUpload from "@/components/FileUpload";
+import { AttachButton, AttachStatus, useAttachments } from "@/components/Attachments";
 import { ArrowUp, Close, Doc, Plus, Stop } from "@/components/Icons";
 import SessionDocuments from "@/components/SessionDocuments";
 import { applyStageEvent } from "@/components/StageProgress";
@@ -54,6 +54,8 @@ export default function Chat() {
   const [viewing, setViewing] = useState<ViewerTarget | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const { corpus, session, offline, refresh } = useDocuments();
+  const attachments = useAttachments(handleIngested);
+  const [dragging, setDragging] = useState(false);
 
   const openViewer = useCallback((target: ViewerTarget) => {
     setShowSources(false);
@@ -139,7 +141,7 @@ export default function Chat() {
 
   function ask(question: string) {
     const text = question.trim();
-    if (!text || pending) return;
+    if (!text || pending || attachments.busy) return;
     const id = crypto.randomUUID();
     setEntries((prev) => [...prev, { kind: "turn", id, question: text, state: EMPTY_STATE }]);
     setInput("");
@@ -191,11 +193,19 @@ export default function Chat() {
     refresh();
   }
 
-  function handleIngested(result: IngestResponse, target: IngestTarget) {
+  function handleIngested(result: IngestResponse, target: IngestTarget, sessionId: string | undefined) {
     refresh();
-    if (target !== "session" || result.succeeded.length === 0) return;
-    setActiveId(currentSessionId());
-    setEntries((prev) => [...prev, { kind: "upload", id: crypto.randomUUID(), files: result.succeeded, at: Date.now() }]);
+    if (target !== "session" || !sessionId || result.succeeded.length === 0) return;
+    const entry: ChatEntry = { kind: "upload", id: crypto.randomUUID(), files: result.succeeded, at: Date.now() };
+    if (sessionId === currentSessionId()) {
+      setActiveId(sessionId);
+      setEntries((prev) => [...prev, entry]);
+    } else {
+      // The user switched chats while the upload ran.
+      setChats((prev) =>
+        saveChats(upsertChat(prev, sessionId, [...(prev.find((chat) => chat.id === sessionId)?.entries ?? []), entry])),
+      );
+    }
   }
 
   function handleSubmit(event: FormEvent) {
@@ -266,7 +276,6 @@ export default function Chat() {
               <Close />
             </button>
           </div>
-          <FileUpload onIngested={handleIngested} />
           <SessionDocuments documents={session} onChanged={refresh} />
           <CorpusDocuments documents={corpus} offline={offline} onChanged={refresh} />
         </aside>
@@ -330,7 +339,6 @@ export default function Chat() {
                   pending={pending}
                   corpusEmpty={corpus !== null && corpus.length === 0 && !sessionScoped}
                   onAsk={ask}
-                  onUpload={() => setShowSources(true)}
                 />
               ) : (
                 <div className="space-y-10">
@@ -364,41 +372,59 @@ export default function Chat() {
           </div>
 
           <form onSubmit={handleSubmit} className="shrink-0 px-4 pb-3 sm:px-8">
-            <div className="mx-auto flex w-full max-w-190 items-end gap-2 rounded-lg border border-line-strong bg-raised p-1.5 shadow-[0_2px_8px_rgb(16_19_24/0.06)] transition-colors focus-within:border-accent">
-              <label htmlFor="question" className="sr-only">
-                Your question
-              </label>
-              <textarea
-                id="question"
-                ref={inputRef}
-                rows={1}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={sessionScoped ? "Ask about this chat's documents" : "Ask about the corpus"}
-                className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] leading-relaxed outline-none placeholder:text-muted focus-visible:outline-none"
-              />
-              {pending ? (
-                <button
-                  type="button"
-                  onClick={() => abortRef.current?.abort()}
-                  aria-label="Stop"
-                  title="Stop"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line-strong text-ink hover:bg-sunken"
-                >
-                  <Stop />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={input.trim() === ""}
-                  aria-label="Send"
-                  title="Send"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-md bg-accent text-white transition-colors hover:bg-accent-strong disabled:bg-sunken disabled:text-muted"
-                >
-                  <ArrowUp />
-                </button>
-              )}
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                if (!attachments.busy) setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                void attachments.upload(event.dataTransfer.files, "session");
+              }}
+              className={`mx-auto w-full max-w-190 rounded-lg border bg-raised p-1.5 shadow-[0_2px_8px_rgb(16_19_24/0.06)] transition-colors focus-within:border-accent ${
+                dragging ? "border-accent bg-accent-soft" : "border-line-strong"
+              }`}
+            >
+              <AttachStatus phase={attachments.phase} rejected={attachments.rejected} onDismiss={attachments.dismiss} />
+              <div className="flex items-end gap-1.5">
+                <AttachButton disabled={attachments.busy} onPick={(files, target) => void attachments.upload(files, target)} />
+                <label htmlFor="question" className="sr-only">
+                  Your question
+                </label>
+                <textarea
+                  id="question"
+                  ref={inputRef}
+                  rows={1}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={sessionScoped ? "Ask about this chat's documents" : "Ask about the corpus"}
+                  className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] leading-relaxed outline-none placeholder:text-muted focus-visible:outline-none"
+                />
+                {pending ? (
+                  <button
+                    type="button"
+                    onClick={() => abortRef.current?.abort()}
+                    aria-label="Stop"
+                    title="Stop"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line-strong text-ink hover:bg-sunken"
+                  >
+                    <Stop />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={input.trim() === "" || attachments.busy}
+                    aria-label="Send"
+                    title={attachments.busy ? "Wait for the upload to finish" : "Send"}
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md bg-accent text-white transition-colors hover:bg-accent-strong disabled:bg-sunken disabled:text-muted"
+                  >
+                    <ArrowUp />
+                  </button>
+                )}
+              </div>
             </div>
             <p className="mx-auto mt-1.5 hidden w-full max-w-190 px-1 text-[11px] text-muted sm:block">
               Enter to send · Shift+Enter for a new line · follow-up questions use the last three turns as context
@@ -423,12 +449,10 @@ function EmptyState({
   pending,
   corpusEmpty,
   onAsk,
-  onUpload,
 }: {
   pending: boolean;
   corpusEmpty: boolean;
   onAsk: (question: string) => void;
-  onUpload: () => void;
 }) {
   return (
     <div className="pt-[4vh]">
@@ -441,11 +465,8 @@ function EmptyState({
 
       {corpusEmpty && (
         <div className="mt-6 rounded-md border border-warn/30 bg-warn-soft px-3 py-2.5 text-sm text-warn">
-          Nothing is indexed yet, so questions can only be answered from the web.{" "}
-          <button type="button" onClick={onUpload} className="font-medium underline xl:hidden">
-            Upload documents
-          </button>
-          <span className="hidden xl:inline">Upload documents in the Sources panel.</span>
+          Nothing is indexed yet, so questions can only be answered from the web. Add documents with
+          the + button in the message box.
         </div>
       )}
 
